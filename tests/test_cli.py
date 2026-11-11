@@ -26,6 +26,7 @@ class Server(BaseHTTPRequestHandler):
     operations = []
     reject_next = False
     drop_create = False
+    api_error = None
     def log_message(self, *args):
         pass
     def respond(self, value, status=200):
@@ -37,6 +38,10 @@ class Server(BaseHTTPRequestHandler):
     def do_POST(self):
         raw = self.rfile.read(int(self.headers.get('Content-Length', 0))).decode()
         if self.path == '/api/v1/notifications':
+            if self.api_error:
+                status, body = self.api_error
+                self.respond(body, status)
+                return
             if self.reject_next:
                 type(self).reject_next = False
                 self.respond({'error': 'unauthorized'}, 401)
@@ -144,6 +149,7 @@ class CLI(unittest.TestCase):
         Server.operations = []
         Server.reject_next = False
         Server.drop_create = False
+        Server.api_error = None
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name)
@@ -201,6 +207,25 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(body['error']['code'], 'create_uncertain')
         self.assertIn('same idempotency key', body['error']['message'])
         self.assertEqual(len(Server.operations), 2)
+
+    def test_notification_error_boundaries(self):
+        self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
+        command = ('notifications', 'create', '--idempotency-key', 'key', '--message', 'Hello')
+        Server.api_error = (422, {'errors': {'message': ['secret marker'], 'unknown-secret-marker': ['secret marker']}})
+        result, body = self.run_cli(*command)
+        self.assertEqual(result.returncode, 3)
+        self.assertIn('message', body['error']['message'])
+        self.assertNotIn('secret marker', result.stderr)
+        self.assertNotIn('unknown-secret-marker', result.stderr)
+        Server.api_error = (503, {'error': 'server_error'})
+        result, body = self.run_cli(*command)
+        self.assertEqual(body['error']['code'], 'create_uncertain')
+        self.assertIn('same idempotency key', body['error']['message'])
+        for status in (403, 404, 429):
+            Server.api_error = (status, {})
+            result, body = self.run_cli(*command)
+            self.assertEqual(result.returncode, 3)
+            self.assertIn(str(status), body['error']['message'])
 
     def test_login_restart_refresh_account_and_logout(self):
         result, body = self.run_cli('auth', 'login', '--browser-driver', str(self.driver))

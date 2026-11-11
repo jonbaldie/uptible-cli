@@ -77,7 +77,7 @@ Exit codes are `0` for success, `2` for usage or configuration errors, `3` for s
 
 ## Current limitations
 
-The connection routes are experimental and may change before a public API contract is published. Leads, statistics, events, billing, permanent notification deletion, and other account operations are not implemented. Full command coverage, server compatibility, reproducible release dependencies, hosted CI, and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
+The connection routes are experimental and may change before a public API contract is published. Leads, statistics, events, billing, permanent notification deletion, and other account operations are not implemented. Full command coverage, server compatibility, reproducible release dependencies and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
 
 ## Development
 

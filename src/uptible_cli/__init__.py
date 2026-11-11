@@ -59,13 +59,19 @@ def request(url, form=None, bearer=None, method=None, _retry=True, payload=None,
                 time.sleep(int(retry_after))
                 return request(url, bearer=bearer, _retry=False)
         code = "http_error"
+        fields = []
         try:
             payload = json.load(exc)
             if isinstance(payload, dict) and isinstance(payload.get("error"), str) and payload["error"] in SERVER_ERRORS:
                 code = payload["error"]
+            if exc.code == 422 and isinstance(payload, dict) and isinstance(payload.get("errors"), dict):
+                allowed = {"message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions", "revision"}
+                fields = sorted(allowed.intersection(payload["errors"]))
         except (ValueError, OSError):
             pass
         message = f"Server rejected request (HTTP {exc.code})."
+        if fields:
+            message += " Check these fields: " + ", ".join(fields) + "."
         if exc.code == 403:
             message += " Check lifetime access and permissions. If connected before notification commands were available, log out and log in again."
         elif exc.code == 409:
@@ -271,7 +277,7 @@ def run(args):
                     if kwargs.get("method"):
                         raise Failure("operation_not_retried", "The connection was refreshed. The write was not retried; check current state before retrying. For create, reuse the same key and input.", 3) from None
                     return request(url, bearer=token["access_token"], **kwargs)
-                if exc.code == "network_error" and args.command == "notifications" and args.action == "create":
+                if (exc.code == "network_error" or getattr(exc, "http_status", 0) >= 500) and args.command == "notifications" and args.action == "create":
                     raise Failure("create_uncertain", "The create outcome is unknown. Retry the same input with the same idempotency key.", 3) from None
                 raise
         if args.command in ("auth", "account"):
