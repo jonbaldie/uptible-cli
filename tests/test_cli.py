@@ -23,6 +23,7 @@ class Server(BaseHTTPRequestHandler):
     drop_refresh_response = False
     login_response = None
     current_refresh = "first"
+    operations = []
     def log_message(self, *args):
         pass
     def respond(self, value, status=200):
@@ -32,7 +33,12 @@ class Server(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
     def do_POST(self):
-        form = urllib.parse.parse_qs(self.rfile.read(int(self.headers.get('Content-Length', 0))).decode())
+        raw = self.rfile.read(int(self.headers.get('Content-Length', 0))).decode()
+        if self.path == '/api/v1/notifications':
+            self.operations.append(('POST', self.path, self.headers.get('Idempotency-Key'), json.loads(raw)))
+            self.respond({'id': 7, 'revision': 1}, 201)
+            return
+        form = urllib.parse.parse_qs(raw)
         self.calls.append((self.path, form))
         if self.path == '/oauth/token':
             if form.get('grant_type') == ['authorization_code']:
@@ -78,7 +84,18 @@ class Server(BaseHTTPRequestHandler):
             self.end_headers()
         else:
             self.respond({'error': 'unknown'}, 404)
+    def do_PUT(self):
+        raw = self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        self.operations.append(('PUT', self.path, json.loads(raw)))
+        if self.path == '/api/v1/notifications/7' and json.loads(raw).get('revision') != 2:
+            self.respond({'error': 'conflict'}, 409)
+        else:
+            self.respond({'id': 7, 'revision': 3})
     def do_GET(self):
+        if self.path.startswith('/api/v1/notifications') or self.path == '/api/v1/installation':
+            self.operations.append(('GET', self.path))
+            self.respond({'path': self.path})
+            return
         parsed = urllib.parse.urlsplit(self.path)
         if parsed.path == '/oauth/authorize':
             type(self).authorization = urllib.parse.parse_qs(parsed.query)
@@ -110,6 +127,7 @@ class CLI(unittest.TestCase):
         Server.reject_logout = False
         Server.drop_refresh_response = False
         Server.calls = []
+        Server.operations = []
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name)
@@ -131,6 +149,28 @@ urllib.request.urlopen(url, timeout=5).read()
     def run_cli(self, *args, env=None):
         result = subprocess.run(self.base + list(args), capture_output=True, text=True, env=env, timeout=10)
         return result, json.loads(result.stdout or result.stderr)
+    def test_notification_commands_and_recovery(self):
+        self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
+        self.assertEqual(set(Server.authorization['scope'][0].split()), {'account:read', 'notifications:read', 'notifications:write', 'installation:read', 'activity:read'})
+        for _ in range(2):
+            result, body = self.run_cli('notifications', 'create', '--idempotency-key', 'order-123', '--message', 'Hello', '--no-display-maps-only')
+            self.assertEqual((result.returncode, body['id']), (0, 7))
+        self.assertEqual(Server.operations[0], Server.operations[1])
+        self.assertEqual(Server.operations[0][2:], ('order-123', {'message': 'Hello', 'display_maps_only': False}))
+        result, body = self.run_cli('notifications', 'edit', '7', '--revision', '1', '--message', 'Changed')
+        self.assertEqual(result.returncode, 3)
+        self.assertIn('revision', body['error']['message'])
+        result, body = self.run_cli('notifications', 'edit', '7', '--revision', '2', '--message', 'Changed')
+        self.assertEqual(body['revision'], 3)
+        self.assertEqual(Server.operations[-1][2], {'message': 'Changed', 'revision': 2})
+        for action in ('activate', 'deactivate', 'archive', 'restore'):
+            self.assertEqual(self.run_cli('notifications', action, '7')[0].returncode, 0)
+        for args in (('notifications', 'show', '7'), ('notifications', 'activity', '7'), ('installation', 'show'), ('notifications', 'list', '--limit', '3', '--after', '7')):
+            self.assertEqual(self.run_cli(*args)[0].returncode, 0)
+        self.assertEqual(Server.operations[-1], ('GET', '/api/v1/notifications?limit=3&after=7'))
+        result = subprocess.run(self.base + ['notifications', 'create', '--idempotency-key', 'bad key', '--message', 'x'], capture_output=True)
+        self.assertEqual(result.returncode, 2)
+
     def test_login_restart_refresh_account_and_logout(self):
         result, body = self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
         self.assertEqual(result.returncode, 0, result.stderr)

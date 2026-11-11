@@ -29,6 +29,24 @@ The CLI opens your browser for authorization and listens for the response on a t
 
 When refresh is enabled on the server, the CLI refreshes an expired access credential automatically and saves the rotated refresh credential.
 
+## Configure a notification
+
+Create a draft with a unique key that you keep with the request. If the response is lost, repeat the exact command with the same key. A key identifies one create operation, so use a new key for a different notification.
+
+```sh
+uptible notifications create --idempotency-key campaign-2026-01 --message "Someone joined"
+uptible notifications list --limit 20
+uptible notifications show 1
+uptible notifications edit 1 --revision 1 --message "Someone signed up"
+uptible notifications activate 1
+uptible installation show
+uptible notifications activity 1
+```
+
+Use the returned ID and revision in place of the example values. Edit requires the current revision and a message. Omitted settings remain unchanged. If an edit conflicts, fetch the notification, review the current settings and revision, and decide whether to retry. Use `--help` on create or edit for configuration options. Activation, installation and activity require lifetime access. `deactivate`, `archive`, and `restore` are also available. Listing returns `next_after`; pass that value as `--after` for the next page. Permanent deletion is not available in this version.
+
+Existing connections made before these commands may lack their permissions. If a command returns HTTP 403, check lifetime access. If the connection lacks permissions, log out and log in again to approve the expanded non-destructive permissions.
+
 ## Disconnect
 
 Revoke the server connection and remove the saved local credential:
@@ -59,7 +77,7 @@ Exit codes are `0` for success, `2` for usage or configuration errors, `3` for s
 
 ## Current limitations
 
-The connection routes are experimental and may change before a public API contract is published. Notifications, leads, statistics, installation, events, billing, and other account operations are not implemented. Full command coverage, server compatibility, reproducible release dependencies, hosted CI, and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
+The connection routes are experimental and may change before a public API contract is published. Leads, statistics, events, billing, permanent notification deletion, and other account operations are not implemented. Full command coverage, server compatibility, reproducible release dependencies, hosted CI, and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
 
 ## Development
 
