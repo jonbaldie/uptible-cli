@@ -17,22 +17,15 @@ This installs from the checkout. There is no published release or update channel
 
 ## Connect your account
 
-This early preview requires an issuer origin and a registered public client ID from your server operator. You do not need a client secret. [Issue #7](https://github.com/jonbaldie/uptible-cli/issues/7) tracks login without this manual configuration. Replace the example values below with the values for your server:
+This is a prerelease. The public service and distribution are not yet available. Once the service is available, run:
 
 ```sh
-export UPTIBLE_ISSUER="https://example.test"
-export UPTIBLE_CLIENT_ID="PUBLIC_CLIENT_ID"
-uptible --issuer "$UPTIBLE_ISSUER" --client-id "$UPTIBLE_CLIENT_ID" auth login
+uptible auth login
+uptible auth status
+uptible account show
 ```
 
-The CLI opens your browser for authorization and listens for the response on a temporary loopback port. Approve access in the browser. The command then displays your account.
-
-Use the same issuer and client ID to check your connection or view the account:
-
-```sh
-uptible --issuer "$UPTIBLE_ISSUER" --client-id "$UPTIBLE_CLIENT_ID" auth status
-uptible --issuer "$UPTIBLE_ISSUER" --client-id "$UPTIBLE_CLIENT_ID" account show
-```
+The CLI opens your browser for authorization and listens for the response on a temporary loopback port. Approve access in the browser. The command then displays your account. If your browser cannot open, set a default browser and retry. A browser and a loopback connection are required.
 
 When refresh is enabled on the server, the CLI refreshes an expired access credential automatically and saves the rotated refresh credential.
 
@@ -41,7 +34,7 @@ When refresh is enabled on the server, the CLI refreshes an expired access crede
 Revoke the server connection and remove the saved local credential:
 
 ```sh
-uptible --issuer "$UPTIBLE_ISSUER" --client-id "$UPTIBLE_CLIENT_ID" auth logout
+uptible auth logout
 ```
 
 To forget the local credential without revoking the server connection, use `auth logout --local`. The server connection may remain active. Revoke it on your account page if needed.
@@ -50,7 +43,7 @@ To forget the local credential without revoking the server connection, use `auth
 
 The CLI uses an available supported operating-system keyring backend. To use a private file instead, add `--credential-file /path/to/private/credentials` before the command on every invocation. On Unix, the directory must be owned by you and inaccessible to other users. The CLI creates the file with mode `0600`. Keep it private.
 
-Use `--profile NAME` before the command to select a separate keyring connection. For file storage, use a distinct file for each profile, issuer, and client ID. Do not copy a rotating refresh credential between machines. Simultaneous use can revoke the token family.
+For an alternate service, pass `--issuer` and its registered `--client-id` before every command. The explicit flags override the built-in defaults; environment variables do not select a connection. Use `--profile NAME` before the command to select a separate keyring connection. For file storage, use a distinct file for each profile, issuer, and client ID. Do not copy a rotating refresh credential between machines. Simultaneous use can revoke the token family.
 
 ## Recover a connection
 
