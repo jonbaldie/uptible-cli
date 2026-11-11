@@ -33,13 +33,27 @@ When refresh is enabled on the server, the CLI refreshes an expired access crede
 
 `uptible leads list --limit 20` lists one page, including leads from inactive and archived notifications. Use `--notification-id` to filter by notification. `--from 2026-01-01` includes that UTC date; `--until 2026-02-01` excludes that UTC date and later dates. Pass the returned `next_cursor` as `--cursor` with the same filters to continue. Use `uptible leads show 123` to inspect one lead.
 
-`uptible leads delete 123` permanently deletes one lead after confirmation. Use `--yes` to confirm in a noninteractive session. Ordinary login grants lead reading, not deletion. To request deletion permission, run `uptible auth logout` and then `uptible auth login --delete-leads`, and approve the browser consent. Existing connections retain their original permissions. Reading requires lifetime access; deletion permission allows deletion of owned leads even after access ends. If a deletion outcome is unknown, check the lead before deciding whether to retry. A lead that is already gone returns 404.
+`uptible leads delete 123` permanently deletes one lead after confirmation. Use `--yes` to confirm in a noninteractive session. Ordinary login grants lead reading, not deletion. To request deletion permission at initial login, use `uptible auth login --delete-leads`. Existing connections retain their original permissions. Safe permission upgrades are tracked in [issue #18](https://github.com/jonbaldie/uptible-cli/issues/18). Reading requires lifetime access; deletion permission allows deletion of owned leads even after access ends. If a deletion outcome is unknown, check the lead before deciding whether to retry. A lead that is already gone returns 404.
 
 ## Read dashboard statistics
 
 Run `uptible stats show` to read dashboard statistics. This requires lifetime access. Capture counts include currently active, non-archived notifications owned by your account. The hour and day counts cover inclusive rolling UTC intervals ending at `as_of`, spanning the preceding hour and 24 hours. Tracks include all account history, including tracks for inactive, archived, or deleted notifications. The server may cache results for up to one second. `as_of` identifies the window end, not a transactional snapshot.
 
-Ordinary login requests statistics read permission. Existing connections retain their permissions. If statistics returns HTTP 403, check lifetime access. If your connection lacks permission, run `uptible auth logout` and then `uptible auth login` to approve the new permission.
+Ordinary login requests statistics read permission. Existing connections retain their permissions. If statistics returns HTTP 403, check lifetime access. Existing connections retain their permissions. Safe permission upgrades are tracked in [issue #18](https://github.com/jonbaldie/uptible-cli/issues/18).
+
+## Submit events and inspect billing
+
+When first connecting, add `--events` to request event submission permission or `--billing` to request billing read permission. Both can be selected together. Ordinary login does not request these permissions. Existing connections cannot yet add them without disconnecting. Safe permission upgrades are tracked in [issue #18](https://github.com/jonbaldie/uptible-cli/issues/18).
+
+```sh
+uptible events capture 123 --session-id visit-123 --event-id signup-123 --email person@example.com
+uptible events track 123 --session-id visit-123 --event-id view-123
+uptible billing status
+```
+
+Event IDs and session IDs are required. Choose stable IDs yourself. If submission returns an uncertain result, retry the exact notification, operation, IDs, and payload. A `processed` receipt confirms processing. A different capture payload for the same identity conflicts. Only live notifications owned by the connected account and covered by lifetime access can accept events.
+
+Billing status reads lifetime access, purchase eligibility, recent attempts, orders and purchase references. Eligibility does not guarantee checkout availability. The command does not initiate checkout or contact a payment provider. Each response contains up to 20 orders and 20 purchase references. Pass `next_cursor` as `--cursor` and `next_claim_cursor` as `--claim-cursor` to read older entries. Each cursor is opaque and bound to its account and list.
 
 ## Configure a notification
 
@@ -57,7 +71,7 @@ uptible notifications activity 1
 
 Use the returned ID and revision in place of the example values. Edit requires the current revision and a message. Omitted settings remain unchanged. If an edit conflicts, fetch the notification, review the current settings and revision, and decide whether to retry. Use `--help` on create or edit for configuration options. Activation, installation and activity require lifetime access. `deactivate`, `archive`, and `restore` are also available. Listing returns `next_after`; pass that value as `--after` for the next page. Permanent deletion is not available in this version.
 
-Existing connections made before these commands may lack their permissions. If a command returns HTTP 403, check lifetime access. If the connection lacks permissions, log out and log in again to approve the expanded non-destructive permissions.
+Existing connections made before these commands may lack their permissions. If a command returns HTTP 403, check lifetime access. Existing connections retain their permissions. Safe permission upgrades are tracked in [issue #18](https://github.com/jonbaldie/uptible-cli/issues/18).
 
 ## Disconnect
 
@@ -102,9 +116,11 @@ Exit codes are `0` for success, `2` for usage or configuration errors, `3` for s
 | Show notification activity | `uptible notifications activity` |
 | List, show, or permanently delete leads | `uptible leads list`, `uptible leads show`, `uptible leads delete` |
 | Permanently delete or preview a notification | Not implemented |
-| Modify an account, view broader statistics or events, or manage billing | Not implemented |
+| Submit capture or tracking events | `uptible events capture`, `uptible events track` |
+| Read lifetime billing | `uptible billing status` |
+| Modify an account, view broader statistics, or initiate checkout | Not implemented |
 
-The connection routes are experimental and may change before a public API contract is published. Events, billing, permanent notification deletion, and other account operations are not implemented. Full command coverage, server compatibility, reproducible release dependencies and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
+The connection routes are experimental and may change before a public API contract is published. Permanent notification deletion, checkout, and other account operations are not implemented. Full command coverage, server compatibility, reproducible release dependencies and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
 
 ## Development
 
