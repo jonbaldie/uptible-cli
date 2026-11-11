@@ -27,6 +27,7 @@ class Server(BaseHTTPRequestHandler):
     reject_next = False
     drop_create = False
     api_error = None
+    event_receipt = {'receipt': 'synthetic-receipt', 'status': 'processed'}
     statistics = {'hour_captures_count': 1, 'captures_count': 2, 'all_captures_count': 3, 'tracks_count': 4, 'as_of': '2026-01-02T00:00:00Z', 'hour_start': '2026-01-01T23:00:00Z', 'day_start': '2026-01-01T00:00:00Z'}
     def log_message(self, *args):
         pass
@@ -38,6 +39,20 @@ class Server(BaseHTTPRequestHandler):
         self.wfile.write(raw)
     def do_POST(self):
         raw = self.rfile.read(int(self.headers.get('Content-Length', 0))).decode()
+        if self.path.startswith('/api/v1/notifications/') and self.path.endswith(('/capture', '/track')):
+            self.operations.append(('POST', self.path, json.loads(raw)))
+            if self.api_error:
+                self.respond(self.api_error[1], self.api_error[0])
+            elif self.drop_create:
+                self.connection.shutdown(2)
+                self.connection.close()
+            elif self.event_receipt == 'malformed':
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"receipt":')
+            else:
+                self.respond(self.event_receipt)
+            return
         if self.path == '/api/v1/notifications':
             if self.api_error:
                 status, body = self.api_error
@@ -122,6 +137,17 @@ class Server(BaseHTTPRequestHandler):
             type(self).reject_next = False
             self.respond({'error': 'unauthorized'}, 401)
             return
+        if self.path.startswith('/api/v1/billing'):
+            self.operations.append(('GET', self.path))
+            if self.api_error:
+                self.respond(self.api_error[1], self.api_error[0])
+            else:
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                if query.get('cursor') == ['claim-next'] or query.get('claim_cursor') == ['order-next']:
+                    self.respond({'errors': {'cursor': ['invalid']}}, 422)
+                else:
+                    self.respond({'live_access': True, 'purchase_eligible': False, 'orders': [], 'claim_references': [], 'next_cursor': None if 'cursor' in query else 'order-next', 'next_claim_cursor': None if 'claim_cursor' in query else 'claim-next'})
+            return
         if self.path == '/api/v1/statistics':
             self.operations.append(('GET', self.path))
             if self.api_error:
@@ -168,6 +194,7 @@ class CLI(unittest.TestCase):
         Server.reject_next = False
         Server.drop_create = False
         Server.api_error = None
+        Server.event_receipt = {'receipt': 'synthetic-receipt', 'status': 'processed'}
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name)
@@ -189,6 +216,43 @@ urllib.request.urlopen(url, timeout=5).read()
     def run_cli(self, *args, env=None):
         result = subprocess.run(self.base + list(args), capture_output=True, text=True, env=env, timeout=10)
         return result, json.loads(result.stdout or result.stderr)
+    def test_events_and_billing(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--events', '--billing', '--browser-driver', str(self.driver))[0].returncode, 0)
+        self.assertTrue({'events:write', 'billing:read'} <= set(Server.authorization['scope'][0].split()))
+        capture = ('events', 'capture', '7', '--session-id', 'session', '--event-id', 'event', '--email', 'person@example.test', '--name', 'Person')
+        result, body = self.run_cli(*capture)
+        self.assertEqual((result.returncode, body), (0, Server.event_receipt))
+        self.assertEqual(Server.operations[-1], ('POST', '/api/v1/notifications/7/capture', {'session_id': 'session', 'event_id': 'event', 'email': 'person@example.test', 'name': 'Person'}))
+        self.assertEqual(self.run_cli('events', 'track', '7', '--session-id', 's', '--event-id', 'e')[1], Server.event_receipt)
+        Server.drop_create = True
+        self.assertEqual(self.run_cli(*capture)[1]['error']['code'], 'event_uncertain')
+        prior = Server.operations[-1]
+        Server.drop_create = False
+        self.assertEqual(self.run_cli(*capture)[0].returncode, 0)
+        self.assertEqual(Server.operations[-1], prior)
+        Server.event_receipt = {'receipt': 'bad', 'status': 'accepted'}
+        self.assertEqual(self.run_cli(*capture)[1]['error']['code'], 'event_uncertain')
+        Server.event_receipt = 'malformed'
+        result, body = self.run_cli(*capture)
+        self.assertEqual(body['error']['code'], 'event_uncertain')
+        self.assertIn('same IDs and payload', body['error']['message'])
+        result, body = self.run_cli('billing', 'status', '--cursor', 'a+/=', '--claim-cursor', 'b+/=')
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue(body['live_access'])
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(Server.operations[-1][1]).query)
+        self.assertEqual(query, {'cursor': ['a+/='], 'claim_cursor': ['b+/=']})
+        first = self.run_cli('billing', 'status')[1]
+        self.assertEqual((first['next_cursor'], first['next_claim_cursor']), ('order-next', 'claim-next'))
+        last = self.run_cli('billing', 'status', '--cursor', first['next_cursor'], '--claim-cursor', first['next_claim_cursor'])[1]
+        self.assertEqual((last['next_cursor'], last['next_claim_cursor']), (None, None))
+        self.assertIn('422', self.run_cli('billing', 'status', '--cursor', first['next_claim_cursor'])[1]['error']['message'])
+        self.assertIn('422', self.run_cli('billing', 'status', '--claim-cursor', first['next_cursor'])[1]['error']['message'])
+        for status in (403, 404, 422, 429):
+            Server.api_error = (status, {'error': 'hidden'})
+            self.assertIn(str(status), self.run_cli(*capture)[1]['error']['message'])
+            self.assertIn(str(status), self.run_cli('billing', 'status')[1]['error']['message'])
+        self.assertNotEqual(subprocess.run(self.base + ['events', 'track', '7', '--session-id', '', '--event-id', 'x'], capture_output=True).returncode, 0)
+
     def test_lead_permissions_pages_and_delete_uncertainty(self):
         self.run_cli('auth', 'login', '--delete-leads', '--browser-driver', str(self.driver))
         self.assertIn('leads:delete', Server.authorization['scope'][0].split())
@@ -238,7 +302,7 @@ urllib.request.urlopen(url, timeout=5).read()
             self.assertNotIn('rotated', result.stderr)
             self.assertEqual(len(Server.operations) - before, 2 if status in (429, 503) else 1)
             if status == 403:
-                self.assertIn('auth logout then auth login', body['error']['message'])
+                self.assertIn('permissions', body['error']['message'])
         Server.api_error = None
         Server.reject_next = True
         Server.reject_refresh = True

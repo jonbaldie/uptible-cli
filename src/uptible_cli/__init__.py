@@ -73,9 +73,9 @@ def request(url, form=None, bearer=None, method=None, _retry=True, payload=None,
         if fields:
             message += " Check these fields: " + ", ".join(fields) + "."
         if exc.code == 403:
-            message += " Check lifetime access and permissions. For new permissions, run auth logout then auth login again; add --delete-leads to login for deletion permission."
+            message += " Check lifetime access and permissions for this connection."
         elif exc.code == 409:
-            message += " Check the create key or fetch the current revision before retrying."
+            message += " Check the request identity or current revision before retrying."
         failure = Failure(code, message, 3)
         failure.http_status = exc.code
         raise failure from None
@@ -162,7 +162,7 @@ class Store:
         elif self.load():
             self.keyring.delete_password("uptible-cli", self.identity)
 
-def authorize(issuer, client, browser, timeout, delete_leads=False):
+def authorize(issuer, client, browser, timeout, delete_leads=False, events=False, billing=False):
     state = secrets.token_urlsafe(32)
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
@@ -194,7 +194,7 @@ def authorize(issuer, client, browser, timeout, delete_leads=False):
     with HTTPServer(("127.0.0.1", 0), Handler) as server:
         server.timeout = 0.25
         callback = f"http://127.0.0.1:{server.server_port}/callback"
-        query = urllib.parse.urlencode({"response_type":"code", "client_id":client, "redirect_uri":callback, "scope":"account:read notifications:read notifications:write installation:read activity:read leads:read statistics:read" + (" leads:delete" if delete_leads else ""), "state":state, "code_challenge":challenge, "code_challenge_method":"S256"})
+        query = urllib.parse.urlencode({"response_type":"code", "client_id":client, "redirect_uri":callback, "scope":"account:read notifications:read notifications:write installation:read activity:read leads:read statistics:read" + (" leads:delete" if delete_leads else "") + (" events:write" if events else "") + (" billing:read" if billing else ""), "state":state, "code_challenge":challenge, "code_challenge_method":"S256"})
         url = issuer + "/oauth/authorize?" + query
         def launch():
             try:
@@ -242,7 +242,7 @@ def run(args):
         if args.command == "auth" and args.action == "login":
             if token:
                 raise Failure("already_connected", "Connection already exists. Log out before login.")
-            token = authorize(issuer, args.client_id, args.browser_driver, args.callback_timeout, args.delete_leads)
+            token = authorize(issuer, args.client_id, args.browser_driver, args.callback_timeout, args.delete_leads, args.events, args.billing)
             try:
                 validated = store.validate(token)
                 account = request(issuer + "/api/v1/account", bearer=validated["access_token"])
@@ -285,13 +285,29 @@ def run(args):
                     store.write(token)
                     token = store.save(request(issuer + "/oauth/token", {"grant_type": "refresh_token", "client_id": args.client_id, "refresh_token": token["refresh_token"]}))
                     if kwargs.get("method"):
-                        raise Failure("operation_not_retried", "The connection was refreshed. The write was not retried; check current state before retrying. For create, reuse the same key and input.", 3) from None
+                        raise Failure("operation_not_retried", "The connection was refreshed. The write was not retried. For event submissions, retry the exact command with the same IDs and payload. For create, reuse the same key and input.", 3) from None
                     return request(url, bearer=token["access_token"], **kwargs)
                 if (exc.code == "network_error" or getattr(exc, "http_status", 0) >= 500) and args.command == "leads" and args.action == "delete":
                     raise Failure("delete_uncertain", "The deletion outcome is unknown. Check the lead before deciding whether to retry.", 3) from None
                 if (exc.code == "network_error" or getattr(exc, "http_status", 0) >= 500) and args.command == "notifications" and args.action == "create":
                     raise Failure("create_uncertain", "The create outcome is unknown. Retry the same input with the same idempotency key.", 3) from None
+                if (exc.code == "network_error" or getattr(exc, "http_status", 0) >= 500) and args.command == "events":
+                    raise Failure("event_uncertain", "The event outcome is unknown. Retry the exact command with the same IDs and payload.", 3) from None
                 raise
+        if args.command == "events":
+            payload = {"session_id": args.session_id, "event_id": args.event_id}
+            if args.action == "capture":
+                payload["email"] = args.email
+                if args.name is not None:
+                    payload["name"] = args.name
+            result = authenticated(issuer + "/api/v1/notifications/" + str(args.id) + "/" + args.action, method="POST", payload=payload)
+            if not isinstance(result, dict) or set(result) != {"receipt", "status"} or not isinstance(result["receipt"], str) or not result["receipt"] or result["status"] != "processed":
+                raise Failure("event_uncertain", "The server returned an invalid receipt. Retry the exact command with the same IDs and payload.", 3)
+            return result
+        if args.command == "billing":
+            params = {key: value for key, value in (("cursor", args.cursor), ("claim_cursor", args.claim_cursor)) if value is not None}
+            query = "?" + urllib.parse.urlencode(params) if params else ""
+            return authenticated(issuer + "/api/v1/billing" + query)
         if args.command in ("auth", "account"):
             account = authenticated(issuer + "/api/v1/account")
             return {"connected": True, "account": account} if args.command == "auth" else account
@@ -341,6 +357,11 @@ def create_key(value):
         raise argparse.ArgumentTypeError("use 1 to 128 ASCII letters, digits, periods, underscores or hyphens")
     return value
 
+def event_id(value):
+    if not value or len(value) > 128:
+        raise argparse.ArgumentTypeError("must contain 1 to 128 characters")
+    return value
+
 def notification_fields(parser):
     parser.add_argument("--message", required=True)
     parser.add_argument("--url-capture")
@@ -361,6 +382,8 @@ def main():
     auth = sub.add_parser("auth").add_subparsers(dest="action", required=True)
     login = auth.add_parser("login")
     login.add_argument("--delete-leads", action="store_true", help="request permission to permanently delete leads during browser consent")
+    login.add_argument("--events", action="store_true", help="request permission to submit events")
+    login.add_argument("--billing", action="store_true", help="request permission to read billing")
     login.add_argument("--browser-driver", help="executable that receives the authorization URL")
     login.add_argument("--callback-timeout", type=int, default=120)
     auth.add_parser("status")
@@ -381,9 +404,22 @@ def main():
     lead_list.add_argument("--cursor", help="opaque next_cursor from the previous page")
     lead_show = leads.add_parser("show")
     lead_show.add_argument("id", type=positive)
-    lead_delete = leads.add_parser("delete", description="Permanently delete one lead. If the outcome is unknown, check the lead before retrying. To grant deletion permission, log out and run auth login --delete-leads.")
+    lead_delete = leads.add_parser("delete", description="Permanently delete one lead. If the outcome is unknown, check the lead before retrying. To request deletion permission at initial login, use auth login --delete-leads.")
     lead_delete.add_argument("id", type=positive)
     lead_delete.add_argument("--yes", action="store_true", help="confirm permanent deletion without prompting")
+    events = sub.add_parser("events", help="submit events for a live notification").add_subparsers(dest="action", required=True)
+    for action in ("capture", "track"):
+        event = events.add_parser(action, description="Retry an uncertain submission with the exact same IDs and payload. A processed receipt confirms processing.")
+        event.add_argument("id", type=positive, help="notification ID")
+        event.add_argument("--session-id", required=True, type=event_id)
+        event.add_argument("--event-id", required=True, type=event_id)
+        if action == "capture":
+            event.add_argument("--email", required=True)
+            event.add_argument("--name")
+    billing = sub.add_parser("billing", help="read lifetime billing status").add_subparsers(dest="action", required=True)
+    status = billing.add_parser("status", description="Read billing status. Purchase eligibility does not guarantee checkout availability.")
+    status.add_argument("--cursor", help="next_cursor for older orders")
+    status.add_argument("--claim-cursor", help="next_claim_cursor for older purchase references")
     notifications = sub.add_parser("notifications").add_subparsers(dest="action", required=True)
     listing = notifications.add_parser("list")
     listing.add_argument("--limit", type=positive, default=20, choices=range(1, 101), metavar="1-100")
