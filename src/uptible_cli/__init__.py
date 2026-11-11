@@ -57,7 +57,9 @@ def request(url, form=None, bearer=None, method=None, _retry=True):
                 code = payload["error"]
         except (ValueError, OSError):
             pass
-        raise Failure(code, f"Server rejected request (HTTP {exc.code}).", 3) from None
+        failure = Failure(code, f"Server rejected request (HTTP {exc.code}).", 3)
+        failure.http_status = exc.code
+        raise failure from None
     except (urllib.error.URLError, TimeoutError, OSError, ValueError):
         raise Failure("network_error", "Server request failed or returned invalid JSON.", 3) from None
 
@@ -189,7 +191,12 @@ def authorize(issuer, client, browser, timeout):
             server.handle_request()
         if "code" not in result:
             raise Failure(result.get("error", "callback_timeout"), "Authorization did not complete. Start login again.")
-        return request(issuer + "/oauth/token", {"grant_type":"authorization_code", "client_id":client, "redirect_uri":callback, "code_verifier":verifier, "code":result["code"]})
+        try:
+            return request(issuer + "/oauth/token", {"grant_type":"authorization_code", "client_id":client, "redirect_uri":callback, "code_verifier":verifier, "code":result["code"]})
+        except Failure as exc:
+            if getattr(exc, "http_status", None) == 400 and exc.code in {"invalid_request", "invalid_client", "invalid_grant", "unauthorized_client", "unsupported_grant_type", "invalid_scope"}:
+                raise
+            raise Failure("login_uncertain", "A grant may have been created. Check your account connections and revoke any unintended connection before retrying.", 3) from None
 
 def run(args):
     issuer = issuer_url(args.issuer)
@@ -213,6 +220,8 @@ def run(args):
                         request(issuer + "/api/v1/logout", form={}, bearer=access)
                     except Failure:
                         raise Failure("cleanup_unconfirmed", "Login failed and grant revocation could not be confirmed. Revoke the connection in your account before retrying.", 3) from None
+                else:
+                    raise Failure("login_uncertain", "A grant may have been created. Check your account connections and revoke any unintended connection before retrying.", 3) from None
                 raise exc
             return {"connected": True, "account": account}
         if args.command == "auth" and args.action == "logout" and args.local:
