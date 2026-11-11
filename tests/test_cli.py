@@ -21,6 +21,7 @@ class Server(BaseHTTPRequestHandler):
     refreshes = 0
     reject_logout = False
     drop_refresh_response = False
+    login_response = None
     current_refresh = "first"
     def log_message(self, *args):
         pass
@@ -35,6 +36,21 @@ class Server(BaseHTTPRequestHandler):
         self.calls.append((self.path, form))
         if self.path == '/oauth/token':
             if form.get('grant_type') == ['authorization_code']:
+                if self.login_response == 'drop':
+                    self.connection.shutdown(2)
+                    self.connection.close()
+                    return
+                if self.login_response == 'malformed':
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b'{\"access_token\":\"synthetic-secret-marker\"')
+                    return
+                if self.login_response == 'unusable':
+                    self.respond({'refresh_token': 'synthetic-secret-marker'})
+                    return
+                if self.login_response == 'reject':
+                    self.respond({'error': 'invalid_grant'}, 400)
+                    return
                 verifier = form['code_verifier'][0]
                 challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
                 if not self.authorization or challenge != self.authorization['code_challenge'][0] or form['redirect_uri'] != self.authorization['redirect_uri']:
@@ -85,6 +101,7 @@ class CLI(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
     def setUp(self):
+        Server.login_response = None
         Server.authorization = None
         Server.reject_refresh = False
         Server.account_error = None
@@ -180,6 +197,27 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(body['error']['code'], 'refresh_uncertain')
         self.assertEqual(Server.refreshes, 1)
         self.assertEqual(self.run_cli('auth', 'logout', '--local')[0].returncode, 0)
+
+    def test_uncertain_login_and_recovery(self):
+        for response in ('drop', 'malformed', 'unusable'):
+            for json_mode in (True, False):
+                Server.login_response = response
+                base = self.base if json_mode else [x for x in self.base if x != '--json']
+                result = subprocess.run(base + ['auth', 'login', '--browser-driver', str(self.driver)], capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 3)
+                self.assertIn('may have been created', result.stderr)
+                self.assertIn('before retrying', result.stderr)
+                self.assertIn('account', result.stderr)
+                self.assertNotIn('synthetic-secret-marker', result.stderr)
+                self.assertFalse(self.creds.exists())
+                if json_mode:
+                    self.assertEqual(json.loads(result.stderr)['error']['code'], 'login_uncertain')
+        Server.login_response = 'reject'
+        result, body = self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
+        self.assertEqual(body['error']['code'], 'invalid_grant')
+        Server.login_response = None
+        result, body = self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_login_failure_revokes_and_retry_succeeds(self):
         Server.account_error = 'synthetic-secret-marker'
