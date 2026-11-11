@@ -142,6 +142,6 @@ The output directory must be empty and the checkout clean. The command builds a 
 
 ## Release
 
-Pushing a tag such as `v0.1.0` runs `.github/workflows/release.yml`. The tag must match the version in `pyproject.toml` and in `uptible_cli.VERSION`. The workflow builds and verifies the distributions with `scripts/verify-artifact.py`, then renders a Homebrew formula with `scripts/homebrew-formula.py`. It publishes a GitHub release with the wheel, the source distribution, `SHA256SUMS`, `SOURCE_REVISION` and `uptible.rb`. Pull requests run the same steps without publishing.
+Pushing a tag such as `v0.1.0` runs `.github/workflows/release.yml`. The tag must match the version in `pyproject.toml` and in `uptible_cli.VERSION`. The workflow builds and verifies the distributions with `scripts/verify-artifact.py`, then renders a Homebrew formula with `scripts/homebrew-formula.py`. A macOS job installs, tests and audits that formula from the built source distribution. Only then does it publish a GitHub release with the wheel, the source distribution, `SHA256SUMS`, `SOURCE_REVISION` and `uptible.rb`. Pull requests run the same steps without publishing.
 
 To publish through Homebrew, copy the released `uptible.rb` to `Formula/uptible.rb` in `jonbaldie/homebrew-tap`. Then check `brew install jonbaldie/tap/uptible` and `brew test jonbaldie/tap/uptible`. The formula installs into its own Python 3.14 virtual environment. The dependency pins in `scripts/homebrew-formula.py` are resolved for `keyring>=25,<26` and `filelock>=3.16,<4`. Update them when those ranges change.

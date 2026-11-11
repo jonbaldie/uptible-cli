@@ -1,7 +1,8 @@
 name: Release
 
-# A v* tag publishes a GitHub release. Pull requests run the same build and
-# formula rendering without publishing, so the release path is proven before a tag.
+# A v* tag publishes a GitHub release. Pull requests run the same build, formula
+# rendering and macOS Homebrew install without publishing, so the release path
+# is proven before a tag.
 on:
   push:
     tags: ['v*']
@@ -12,10 +13,10 @@ permissions:
   contents: read
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -25,9 +26,11 @@ jobs:
         with:
           python-version: '3.14'
       - name: Read the package version
+        id: version
         run: |
           version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
           echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Check the tag matches the package version
         if: startsWith(github.ref, 'refs/tags/')
         run: |
@@ -39,21 +42,60 @@ jobs:
         run: python scripts/verify-artifact.py "$RUNNER_TEMP/dist"
       - name: Render the Homebrew formula
         run: |
-          python scripts/homebrew-formula.py --version "$VERSION" --sdist "$RUNNER_TEMP/dist/uptible_cli-$VERSION.tar.gz" > "$RUNNER_TEMP/uptible.rb"
-          ruby -c "$RUNNER_TEMP/uptible.rb"
+          python scripts/homebrew-formula.py --version "$VERSION" --sdist "$RUNNER_TEMP/dist/uptible_cli-$VERSION.tar.gz" > "$RUNNER_TEMP/dist/uptible.rb"
+          ruby -c "$RUNNER_TEMP/dist/uptible.rb"
       - uses: actions/upload-artifact@v6
         with:
-          name: release-${{ env.VERSION }}
-          path: |
-            ${{ runner.temp }}/dist/
-            ${{ runner.temp }}/uptible.rb
+          name: release
+          path: ${{ runner.temp }}/dist/
           if-no-files-found: error
+
+  homebrew:
+    # Installs the formula from the built sdist, so a broken formula fails before release.
+    needs: build
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+      HOMEBREW_NO_ANALYTICS: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v6
+        with:
+          name: release
+          path: ${{ runner.temp }}/dist
+      - name: Install, test and audit the formula
+        run: |
+          sdist="$RUNNER_TEMP/dist/uptible_cli-$VERSION.tar.gz"
+          brew tap-new --no-git local/uptible
+          python3 scripts/homebrew-formula.py --version "$VERSION" --sdist "$sdist" --url "file://$sdist" \
+            > "$(brew --repository)/Library/Taps/local/homebrew-uptible/Formula/uptible.rb"
+          brew install local/uptible/uptible
+          brew test local/uptible/uptible
+          test "$(uptible --version)" = "uptible $VERSION"
+          brew audit --strict --formula local/uptible/uptible
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build, homebrew]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: release
+          path: ${{ runner.temp }}/dist
       - name: Publish the GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          cd "$RUNNER_TEMP/dist"
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "uptible $VERSION" --generate-notes \
-            "$RUNNER_TEMP"/dist/*.whl "$RUNNER_TEMP"/dist/*.tar.gz \
-            "$RUNNER_TEMP/dist/SHA256SUMS" "$RUNNER_TEMP/dist/SOURCE_REVISION" "$RUNNER_TEMP/uptible.rb"
+            ./*.whl ./*.tar.gz SHA256SUMS SOURCE_REVISION uptible.rb

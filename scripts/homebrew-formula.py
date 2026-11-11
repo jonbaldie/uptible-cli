@@ -41,19 +41,16 @@ def render(version, url, sha256):
   desc "Connect and manage an Uptible account from the terminal"
   homepage "https://github.com/jonbaldie/uptible-cli"
   url "{url}"
-  version "{version}"
   sha256 "{sha256}"
 
   depends_on "python@3.14"
 
   on_linux do
     depends_on "cryptography"
-  end
 
-{common}
-  on_linux do
 {linux}  end
 
+{common}
   def install
     virtualenv_install_with_resources
   end
