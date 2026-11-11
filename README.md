@@ -17,7 +17,7 @@ This installs from the checkout. There is no published release or update channel
 
 ## Connect your account
 
-Ask your server operator for the issuer origin and a registered public client ID. You do not need a client secret. Replace the example values below with the values for your server:
+This early preview requires an issuer origin and a registered public client ID from your server operator. You do not need a client secret. [Issue #7](https://github.com/jonbaldie/uptible-cli/issues/7) tracks login without this manual configuration. Replace the example values below with the values for your server:
 
 ```sh
 export UPTIBLE_ISSUER="https://example.test"
