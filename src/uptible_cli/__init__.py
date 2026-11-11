@@ -259,30 +259,44 @@ def run(args):
             request(issuer + "/api/v1/logout", form={}, bearer=token["access_token"])
             store.delete()
             return {"connected": False, "revoked": True}
-        bearer = token["access_token"]
+        def authenticated(url, **kwargs):
+            nonlocal token
+            try:
+                return request(url, bearer=token["access_token"], **kwargs)
+            except Failure as exc:
+                if getattr(exc, "http_status", None) == 401:
+                    token["refresh_pending"] = True
+                    store.write(token)
+                    token = store.save(request(issuer + "/oauth/token", {"grant_type": "refresh_token", "client_id": args.client_id, "refresh_token": token["refresh_token"]}))
+                    if kwargs.get("method"):
+                        raise Failure("operation_not_retried", "The connection was refreshed. The write was not retried; check current state before retrying. For create, reuse the same key and input.", 3) from None
+                    return request(url, bearer=token["access_token"], **kwargs)
+                if exc.code == "network_error" and args.command == "notifications" and args.action == "create":
+                    raise Failure("create_uncertain", "The create outcome is unknown. Retry the same input with the same idempotency key.", 3) from None
+                raise
         if args.command in ("auth", "account"):
-            account = request(issuer + "/api/v1/account", bearer=bearer)
+            account = authenticated(issuer + "/api/v1/account")
             return {"connected": True, "account": account} if args.command == "auth" else account
         if args.command == "installation":
-            return request(issuer + "/api/v1/installation", bearer=bearer)
+            return authenticated(issuer + "/api/v1/installation")
         path = issuer + "/api/v1/notifications"
         if args.action == "list":
             params = {"limit": args.limit}
             if args.after is not None:
                 params["after"] = args.after
-            return request(path + "?" + urllib.parse.urlencode(params), bearer=bearer)
+            return authenticated(path + "?" + urllib.parse.urlencode(params))
         if args.action == "create":
-            return request(path, bearer=bearer, method="POST", payload=notification_payload(args), extra_headers={"Idempotency-Key": args.idempotency_key})
+            return authenticated(path, method="POST", payload=notification_payload(args), extra_headers={"Idempotency-Key": args.idempotency_key})
         path += "/" + str(args.id)
         if args.action == "show":
-            return request(path, bearer=bearer)
+            return authenticated(path)
         if args.action == "activity":
-            return request(path + "/activity", bearer=bearer)
+            return authenticated(path + "/activity")
         if args.action == "edit":
             payload = notification_payload(args)
             payload["revision"] = args.revision
-            return request(path, bearer=bearer, method="PUT", payload=payload)
-        return request(path + "/" + args.action, bearer=bearer, method="PUT", payload={})
+            return authenticated(path, method="PUT", payload=payload)
+        return authenticated(path + "/" + args.action, method="PUT", payload={})
 
 def notification_payload(args):
     return {name: getattr(args, name) for name in ("message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions") if getattr(args, name) is not None}

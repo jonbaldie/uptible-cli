@@ -24,6 +24,8 @@ class Server(BaseHTTPRequestHandler):
     login_response = None
     current_refresh = "first"
     operations = []
+    reject_next = False
+    drop_create = False
     def log_message(self, *args):
         pass
     def respond(self, value, status=200):
@@ -35,7 +37,15 @@ class Server(BaseHTTPRequestHandler):
     def do_POST(self):
         raw = self.rfile.read(int(self.headers.get('Content-Length', 0))).decode()
         if self.path == '/api/v1/notifications':
+            if self.reject_next:
+                type(self).reject_next = False
+                self.respond({'error': 'unauthorized'}, 401)
+                return
             self.operations.append(('POST', self.path, self.headers.get('Idempotency-Key'), json.loads(raw)))
+            if self.drop_create:
+                self.connection.shutdown(2)
+                self.connection.close()
+                return
             self.respond({'id': 7, 'revision': 1}, 201)
             return
         form = urllib.parse.parse_qs(raw)
@@ -92,6 +102,10 @@ class Server(BaseHTTPRequestHandler):
         else:
             self.respond({'id': 7, 'revision': 3})
     def do_GET(self):
+        if self.reject_next and self.path.startswith('/api/'):
+            type(self).reject_next = False
+            self.respond({'error': 'unauthorized'}, 401)
+            return
         if self.path.startswith('/api/v1/notifications') or self.path == '/api/v1/installation':
             self.operations.append(('GET', self.path))
             self.respond({'path': self.path})
@@ -128,6 +142,8 @@ class CLI(unittest.TestCase):
         Server.drop_refresh_response = False
         Server.calls = []
         Server.operations = []
+        Server.reject_next = False
+        Server.drop_create = False
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name)
@@ -170,6 +186,21 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(Server.operations[-1], ('GET', '/api/v1/notifications?limit=3&after=7'))
         result = subprocess.run(self.base + ['notifications', 'create', '--idempotency-key', 'bad key', '--message', 'x'], capture_output=True)
         self.assertEqual(result.returncode, 2)
+
+    def test_unauthorized_refresh_and_uncertain_create(self):
+        self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
+        Server.reject_next = True
+        self.assertEqual(self.run_cli('notifications', 'show', '7')[0].returncode, 0)
+        self.assertEqual(Server.refreshes, 1)
+        Server.reject_next = True
+        result, body = self.run_cli('notifications', 'create', '--idempotency-key', 'key', '--message', 'Hello')
+        self.assertEqual(body['error']['code'], 'operation_not_retried')
+        self.assertEqual(Server.operations, [('GET', '/api/v1/notifications/7')])
+        Server.drop_create = True
+        result, body = self.run_cli('notifications', 'create', '--idempotency-key', 'key', '--message', 'Hello')
+        self.assertEqual(body['error']['code'], 'create_uncertain')
+        self.assertIn('same idempotency key', body['error']['message'])
+        self.assertEqual(len(Server.operations), 2)
 
     def test_login_restart_refresh_account_and_logout(self):
         result, body = self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
