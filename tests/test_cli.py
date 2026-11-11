@@ -280,5 +280,44 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertFalse(body['revoked'])
         self.assertFalse(self.creds.exists())
 
+class DefaultRouting(unittest.TestCase):
+    def test_clean_login_routes_to_the_official_service_and_public_client(self):
+        from contextlib import nullcontext, redirect_stdout
+        from io import StringIO
+        from unittest.mock import patch
+        import uptible_cli
+
+        class MemoryStore:
+            lock = nullcontext()
+            def __init__(self, issuer, client, profile, filename):
+                self.connection = (issuer, client, profile, filename)
+            def load(self):
+                return None
+            def validate(self, token):
+                return token
+            def save(self, token):
+                pass
+
+        with patch.object(sys, 'argv', ['uptible', 'auth', 'login']), \
+             patch.dict(os.environ, {'UPTIBLE_ISSUER': 'https://other.example', 'UPTIBLE_CLIENT_ID': 'other'}), \
+             patch.object(uptible_cli, 'Store', MemoryStore), \
+             patch.object(uptible_cli, 'authorize', return_value={'access_token': 'synthetic'}) as authorize, \
+             patch.object(uptible_cli, 'request', return_value={'id': 42}) as request, \
+             redirect_stdout(StringIO()):
+            self.assertEqual(uptible_cli.main(), 0)
+        self.assertEqual(authorize.call_args.args[:2], ('https://uptible.com', '5af9087d-4c3a-4bb9-a144-3cbf5560771a'))
+        self.assertEqual(request.call_args.args[0], 'https://uptible.com/api/v1/account')
+
+    def test_alternate_service_requires_explicit_client(self):
+        from contextlib import redirect_stderr
+        from io import StringIO
+        from unittest.mock import patch
+        import uptible_cli
+
+        with patch.object(sys, 'argv', ['uptible', '--issuer', 'https://other.example', 'auth', 'status']), redirect_stderr(StringIO()) as error:
+            self.assertEqual(uptible_cli.main(), 2)
+        self.assertIn('--client-id', error.getvalue())
+
+
 if __name__ == '__main__':
     unittest.main()

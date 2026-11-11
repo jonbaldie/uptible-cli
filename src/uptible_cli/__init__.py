@@ -22,6 +22,8 @@ from filelock import FileLock, Timeout
 from keyring.errors import KeyringError
 
 VERSION = "0.1.0"
+DEFAULT_ISSUER = "https://uptible.com"
+DEFAULT_CLIENT_ID = "5af9087d-4c3a-4bb9-a144-3cbf5560771a"
 SERVER_ERRORS = {"invalid_request", "invalid_client", "invalid_grant", "unauthorized_client", "unsupported_grant_type", "invalid_scope", "access_denied", "temporarily_unavailable", "server_error"}
 
 class Failure(Exception):
@@ -169,7 +171,7 @@ def authorize(issuer, client, browser, timeout):
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.end_headers()
-            self.wfile.write(b"Authorization received. You may close this window.")
+            self.wfile.write(b"Authorization received. You may close this window." if "code" in result else b"Authorization was not completed. You may close this window.")
         def log_message(self, *args):
             pass
     with HTTPServer(("127.0.0.1", 0), Handler) as server:
@@ -190,7 +192,9 @@ def authorize(issuer, client, browser, timeout):
         while not result and time.monotonic() < deadline:
             server.handle_request()
         if "code" not in result:
-            raise Failure(result.get("error", "callback_timeout"), "Authorization did not complete. Start login again.")
+            error = result.get("error", "callback_timeout")
+            message = "Could not open a browser. Set a default browser and start login again." if error == "browser_failed" else "Authorization did not complete. Start login again."
+            raise Failure(error, message)
         try:
             return request(issuer + "/oauth/token", {"grant_type":"authorization_code", "client_id":client, "redirect_uri":callback, "code_verifier":verifier, "code":result["code"]})
         except Failure as exc:
@@ -199,7 +203,10 @@ def authorize(issuer, client, browser, timeout):
             raise Failure("login_uncertain", "A grant may have been created. Check your account connections and revoke any unintended connection before retrying.", 3) from None
 
 def run(args):
-    issuer = issuer_url(args.issuer)
+    issuer = issuer_url(args.issuer or DEFAULT_ISSUER)
+    if issuer != DEFAULT_ISSUER and not args.client_id:
+        raise Failure("client_id_required", "An alternate service requires its registered public client ID via --client-id.", 2)
+    args.client_id = args.client_id or DEFAULT_CLIENT_ID
     if args.command == "auth" and args.action == "login" and not 1 <= args.callback_timeout <= 600:
         raise Failure("invalid_timeout", "Callback timeout must be between 1 and 600 seconds.", 2)
     store = Store(issuer, args.client_id, args.profile, args.credential_file)
@@ -247,8 +254,8 @@ def run(args):
 def main():
     p = argparse.ArgumentParser(prog="uptible", description="Connect to an Uptible account.")
     p.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
-    p.add_argument("--issuer", required=True, help="HTTPS server origin")
-    p.add_argument("--client-id", required=True, help="registered public client identifier")
+    p.add_argument("--issuer", help="alternate HTTPS server origin (default: https://uptible.com; requires --client-id)")
+    p.add_argument("--client-id", help="alternate registered public client identifier")
     p.add_argument("--profile", default="default", help="local connection name")
     p.add_argument("--credential-file", help="explicit private credential file")
     p.add_argument("--json", action="store_true", help="machine-readable output")
