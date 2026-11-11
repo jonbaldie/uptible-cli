@@ -142,7 +142,11 @@ class Server(BaseHTTPRequestHandler):
             if self.api_error:
                 self.respond(self.api_error[1], self.api_error[0])
             else:
-                self.respond({'live_access': True, 'purchase_eligible': False, 'orders': [], 'claim_references': [], 'next_cursor': None, 'next_claim_cursor': None})
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                if query.get('cursor') == ['claim-next'] or query.get('claim_cursor') == ['order-next']:
+                    self.respond({'errors': {'cursor': ['invalid']}}, 422)
+                else:
+                    self.respond({'live_access': True, 'purchase_eligible': False, 'orders': [], 'claim_references': [], 'next_cursor': None if 'cursor' in query else 'order-next', 'next_claim_cursor': None if 'claim_cursor' in query else 'claim-next'})
             return
         if self.path == '/api/v1/statistics':
             self.operations.append(('GET', self.path))
@@ -237,6 +241,12 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertTrue(body['live_access'])
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(Server.operations[-1][1]).query)
         self.assertEqual(query, {'cursor': ['a+/='], 'claim_cursor': ['b+/=']})
+        first = self.run_cli('billing', 'status')[1]
+        self.assertEqual((first['next_cursor'], first['next_claim_cursor']), ('order-next', 'claim-next'))
+        last = self.run_cli('billing', 'status', '--cursor', first['next_cursor'], '--claim-cursor', first['next_claim_cursor'])[1]
+        self.assertEqual((last['next_cursor'], last['next_claim_cursor']), (None, None))
+        self.assertIn('422', self.run_cli('billing', 'status', '--cursor', first['next_claim_cursor'])[1]['error']['message'])
+        self.assertIn('422', self.run_cli('billing', 'status', '--claim-cursor', first['next_cursor'])[1]['error']['message'])
         for status in (403, 404, 422, 429):
             Server.api_error = (status, {'error': 'hidden'})
             self.assertIn(str(status), self.run_cli(*capture)[1]['error']['message'])
