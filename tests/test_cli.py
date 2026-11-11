@@ -106,12 +106,22 @@ class Server(BaseHTTPRequestHandler):
             self.respond({'error': 'conflict'}, 409)
         else:
             self.respond({'id': 7, 'revision': 3})
+    def do_DELETE(self):
+        self.operations.append(('DELETE', self.path))
+        if self.drop_create:
+            self.connection.shutdown(2)
+            self.connection.close()
+        elif self.api_error:
+            self.respond(self.api_error[1], self.api_error[0])
+        else:
+            self.send_response(204)
+            self.end_headers()
     def do_GET(self):
         if self.reject_next and self.path.startswith('/api/'):
             type(self).reject_next = False
             self.respond({'error': 'unauthorized'}, 401)
             return
-        if self.path.startswith('/api/v1/notifications') or self.path == '/api/v1/installation':
+        if self.path.startswith(('/api/v1/notifications', '/api/v1/leads')) or self.path == '/api/v1/installation':
             self.operations.append(('GET', self.path))
             self.respond({'path': self.path})
             return
@@ -171,9 +181,31 @@ urllib.request.urlopen(url, timeout=5).read()
     def run_cli(self, *args, env=None):
         result = subprocess.run(self.base + list(args), capture_output=True, text=True, env=env, timeout=10)
         return result, json.loads(result.stdout or result.stderr)
+    def test_lead_permissions_pages_and_delete_uncertainty(self):
+        self.run_cli('auth', 'login', '--delete-leads', '--browser-driver', str(self.driver))
+        self.assertIn('leads:delete', Server.authorization['scope'][0].split())
+        result, body = self.run_cli('leads', 'list', '--limit', '2', '--notification-id', '7', '--from', '2026-01-01', '--until', '2026-02-01', '--cursor', 'a+/=')
+        self.assertEqual(result.returncode, 0)
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(body['path']).query)
+        self.assertEqual(query, {'limit': ['2'], 'notification_id': ['7'], 'from': ['2026-01-01'], 'until': ['2026-02-01'], 'cursor': ['a+/=']})
+        self.assertEqual(self.run_cli('leads', 'show', '7')[1]['path'], '/api/v1/leads/7')
+        result, body = self.run_cli('leads', 'delete', '7')
+        self.assertEqual(body['error']['code'], 'confirmation_required')
+        self.assertEqual(self.run_cli('leads', 'delete', '7', '--yes')[0].returncode, 0)
+        Server.drop_create = True
+        result, body = self.run_cli('leads', 'delete', '7', '--yes')
+        self.assertEqual(body['error']['code'], 'delete_uncertain')
+        self.assertEqual(Server.operations.count(('DELETE', '/api/v1/leads/7')), 2)
+        Server.drop_create = False
+        for status in (403, 404, 422, 429):
+            Server.api_error = (status, {'errors': {'secret': ['secret marker']}})
+            result, body = self.run_cli('leads', 'delete', '7', '--yes')
+            self.assertIn(str(status), body['error']['message'])
+            self.assertNotIn('secret marker', result.stderr)
+
     def test_notification_commands_and_recovery(self):
         self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
-        self.assertEqual(set(Server.authorization['scope'][0].split()), {'account:read', 'notifications:read', 'notifications:write', 'installation:read', 'activity:read'})
+        self.assertEqual(set(Server.authorization['scope'][0].split()), {'account:read', 'notifications:read', 'notifications:write', 'installation:read', 'activity:read', 'leads:read'})
         for _ in range(2):
             result, body = self.run_cli('notifications', 'create', '--idempotency-key', 'order-123', '--message', 'Hello', '--no-display-maps-only')
             self.assertEqual((result.returncode, body['id']), (0, 7))

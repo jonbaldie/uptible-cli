@@ -73,7 +73,7 @@ def request(url, form=None, bearer=None, method=None, _retry=True, payload=None,
         if fields:
             message += " Check these fields: " + ", ".join(fields) + "."
         if exc.code == 403:
-            message += " Check lifetime access and permissions. If connected before notification commands were available, log out and log in again."
+            message += " Check lifetime access and permissions. For new permissions, run auth logout then auth login again; add --delete-leads to login for deletion permission."
         elif exc.code == 409:
             message += " Check the create key or fetch the current revision before retrying."
         failure = Failure(code, message, 3)
@@ -162,7 +162,7 @@ class Store:
         elif self.load():
             self.keyring.delete_password("uptible-cli", self.identity)
 
-def authorize(issuer, client, browser, timeout):
+def authorize(issuer, client, browser, timeout, delete_leads=False):
     state = secrets.token_urlsafe(32)
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
@@ -194,7 +194,7 @@ def authorize(issuer, client, browser, timeout):
     with HTTPServer(("127.0.0.1", 0), Handler) as server:
         server.timeout = 0.25
         callback = f"http://127.0.0.1:{server.server_port}/callback"
-        query = urllib.parse.urlencode({"response_type":"code", "client_id":client, "redirect_uri":callback, "scope":"account:read notifications:read notifications:write installation:read activity:read", "state":state, "code_challenge":challenge, "code_challenge_method":"S256"})
+        query = urllib.parse.urlencode({"response_type":"code", "client_id":client, "redirect_uri":callback, "scope":"account:read notifications:read notifications:write installation:read activity:read leads:read" + (" leads:delete" if delete_leads else ""), "state":state, "code_challenge":challenge, "code_challenge_method":"S256"})
         url = issuer + "/oauth/authorize?" + query
         def launch():
             try:
@@ -226,13 +226,19 @@ def run(args):
     args.client_id = args.client_id or DEFAULT_CLIENT_ID
     if args.command == "auth" and args.action == "login" and not 1 <= args.callback_timeout <= 600:
         raise Failure("invalid_timeout", "Callback timeout must be between 1 and 600 seconds.", 2)
+    if args.command == "leads" and args.action == "delete" and not args.yes:
+        if not sys.stdin.isatty():
+            raise Failure("confirmation_required", "Deletion requires confirmation. Use --yes for noninteractive deletion.", 2)
+        print(f"Permanently delete lead {args.id}? [y/N] ", end="", file=sys.stderr, flush=True)
+        if input().strip().lower() not in ("y", "yes"):
+            raise Failure("delete_cancelled", "Deletion cancelled.")
     store = Store(issuer, args.client_id, args.profile, args.credential_file)
     with store.lock:
         token = store.load()
         if args.command == "auth" and args.action == "login":
             if token:
                 raise Failure("already_connected", "Connection already exists. Log out before login.")
-            token = authorize(issuer, args.client_id, args.browser_driver, args.callback_timeout)
+            token = authorize(issuer, args.client_id, args.browser_driver, args.callback_timeout, args.delete_leads)
             try:
                 validated = store.validate(token)
                 account = request(issuer + "/api/v1/account", bearer=validated["access_token"])
@@ -277,6 +283,8 @@ def run(args):
                     if kwargs.get("method"):
                         raise Failure("operation_not_retried", "The connection was refreshed. The write was not retried; check current state before retrying. For create, reuse the same key and input.", 3) from None
                     return request(url, bearer=token["access_token"], **kwargs)
+                if (exc.code == "network_error" or getattr(exc, "http_status", 0) >= 500) and args.command == "leads" and args.action == "delete":
+                    raise Failure("delete_uncertain", "The deletion outcome is unknown. Check the lead before deciding whether to retry.", 3) from None
                 if (exc.code == "network_error" or getattr(exc, "http_status", 0) >= 500) and args.command == "notifications" and args.action == "create":
                     raise Failure("create_uncertain", "The create outcome is unknown. Retry the same input with the same idempotency key.", 3) from None
                 raise
@@ -285,6 +293,14 @@ def run(args):
             return {"connected": True, "account": account} if args.command == "auth" else account
         if args.command == "installation":
             return authenticated(issuer + "/api/v1/installation")
+        if args.command == "leads":
+            path = issuer + "/api/v1/leads"
+            if args.action == "list":
+                params = {"limit": args.limit}
+                params.update({key: value for key, value in (("notification_id", args.notification_id), ("from", args.date_from), ("until", args.until), ("cursor", args.cursor)) if value is not None})
+                return authenticated(path + "?" + urllib.parse.urlencode(params))
+            path += "/" + str(args.id)
+            return authenticated(path, method="DELETE") if args.action == "delete" else authenticated(path)
         path = issuer + "/api/v1/notifications"
         if args.action == "list":
             params = {"limit": args.limit}
@@ -338,6 +354,7 @@ def main():
     sub = p.add_subparsers(dest="command", required=True)
     auth = sub.add_parser("auth").add_subparsers(dest="action", required=True)
     login = auth.add_parser("login")
+    login.add_argument("--delete-leads", action="store_true", help="request permission to permanently delete leads during browser consent")
     login.add_argument("--browser-driver", help="executable that receives the authorization URL")
     login.add_argument("--callback-timeout", type=int, default=120)
     auth.add_parser("status")
@@ -347,6 +364,18 @@ def main():
     account.add_parser("show")
     installation = sub.add_parser("installation").add_subparsers(dest="action", required=True)
     installation.add_parser("show")
+    leads = sub.add_parser("leads", help="browse or permanently delete collected leads").add_subparsers(dest="action", required=True)
+    lead_list = leads.add_parser("list", description="List one page, including leads from inactive and archived notifications. Dates are UTC; --from is inclusive and --until is exclusive. Pass next_cursor as --cursor with the same filters.")
+    lead_list.add_argument("--limit", type=positive, default=20, choices=range(1, 101), metavar="1-100")
+    lead_list.add_argument("--notification-id", type=positive)
+    lead_list.add_argument("--from", dest="date_from", help="inclusive UTC date (YYYY-MM-DD)")
+    lead_list.add_argument("--until", help="exclusive UTC date (YYYY-MM-DD)")
+    lead_list.add_argument("--cursor", help="opaque next_cursor from the previous page")
+    lead_show = leads.add_parser("show")
+    lead_show.add_argument("id", type=positive)
+    lead_delete = leads.add_parser("delete", description="Permanently delete one lead. If the outcome is unknown, check the lead before retrying. To grant deletion permission, log out and run auth login --delete-leads.")
+    lead_delete.add_argument("id", type=positive)
+    lead_delete.add_argument("--yes", action="store_true", help="confirm permanent deletion without prompting")
     notifications = sub.add_parser("notifications").add_subparsers(dest="action", required=True)
     listing = notifications.add_parser("list")
     listing.add_argument("--limit", type=positive, default=20, choices=range(1, 101), metavar="1-100")

@@ -29,6 +29,12 @@ The CLI opens your browser for authorization and listens for the response on a t
 
 When refresh is enabled on the server, the CLI refreshes an expired access credential automatically and saves the rotated refresh credential.
 
+## Browse and delete leads
+
+`uptible leads list --limit 20` lists one page, including leads from inactive and archived notifications. Use `--notification-id` to filter by notification. `--from 2026-01-01` includes that UTC date; `--until 2026-02-01` excludes that UTC date and later dates. Pass the returned `next_cursor` as `--cursor` with the same filters to continue. Use `uptible leads show 123` to inspect one lead.
+
+`uptible leads delete 123` permanently deletes one lead after confirmation. Use `--yes` to confirm in a noninteractive session. Ordinary login grants lead reading, not deletion. To request deletion permission, run `uptible auth logout` and then `uptible auth login --delete-leads`, and approve the browser consent. Existing connections retain their original permissions. Reading requires lifetime access; deletion permission allows deletion of owned leads even after access ends. If a deletion outcome is unknown, check the lead before deciding whether to retry. A lead that is already gone returns 404.
+
 ## Configure a notification
 
 Create a draft with a unique key that you keep with the request. If the response is lost, repeat the exact command with the same key. A key identifies one create operation, so use a new key for a different notification.
@@ -87,10 +93,11 @@ Exit codes are `0` for success, `2` for usage or configuration errors, `3` for s
 | Archive or restore a notification | `uptible notifications archive`, `uptible notifications restore` |
 | Show installation details | `uptible installation show` |
 | Show notification activity | `uptible notifications activity` |
+| List, show, or permanently delete leads | `uptible leads list`, `uptible leads show`, `uptible leads delete` |
 | Permanently delete or preview a notification | Not implemented |
 | Modify an account, manage leads, view broader statistics or events, or manage billing | Not implemented |
 
-The connection routes are experimental and may change before a public API contract is published. Leads, statistics, events, billing, permanent notification deletion, and other account operations are not implemented. Full command coverage, server compatibility, reproducible release dependencies and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
+The connection routes are experimental and may change before a public API contract is published. Statistics, events, billing, permanent notification deletion, and other account operations are not implemented. Full command coverage, server compatibility, reproducible release dependencies and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
 
 ## Development
 

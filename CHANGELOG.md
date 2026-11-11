@@ -1,5 +1,7 @@
 # Changelog
 
+- Add lead browsing and explicitly authorized permanent deletion.
+
 - Add notification configuration and lifecycle commands, installation and activity readback.
 
 ## Unreleased
