@@ -64,3 +64,11 @@ The connection routes are experimental and may change before a public API contra
 ## Development
 
 Run the synthetic loopback tests with `python -m unittest discover -s tests -v`. The tests use an explicit browser driver and do not open a system browser or contact a real account.
+
+To build and verify the committed checkout as installable distributions, run:
+
+```sh
+python3 scripts/verify-artifact.py /tmp/uptible-verified
+```
+
+The output directory must be empty and the checkout clean. The command builds a wheel and source distribution from the commit, checks their file lists, installs the wheel in a fresh temporary environment, and runs the synthetic tests outside the checkout. It records the commit and SHA-256 digests alongside the artifacts. It downloads pinned build tools and the package's runtime dependencies from the configured Python package index. CI runs this check on Linux with Python 3.10 and 3.14 and retains the artifacts. These checks do not establish operating-system keyring support, deployed-service compatibility, or a release channel. Runtime dependencies are not locked for release; full distribution and command coverage remain in issue #1.
