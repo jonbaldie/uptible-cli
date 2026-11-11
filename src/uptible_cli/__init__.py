@@ -162,7 +162,7 @@ class Store:
         elif self.load():
             self.keyring.delete_password("uptible-cli", self.identity)
 
-def authorize(issuer, client, browser, timeout, delete_leads=False, events=False, billing=False):
+def authorize(issuer, client, browser, timeout, delete_leads=False, events=False, billing=False, scopes=None):
     state = secrets.token_urlsafe(32)
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
@@ -194,7 +194,7 @@ def authorize(issuer, client, browser, timeout, delete_leads=False, events=False
     with HTTPServer(("127.0.0.1", 0), Handler) as server:
         server.timeout = 0.25
         callback = f"http://127.0.0.1:{server.server_port}/callback"
-        query = urllib.parse.urlencode({"response_type":"code", "client_id":client, "redirect_uri":callback, "scope":"account:read notifications:read notifications:write installation:read activity:read leads:read statistics:read" + (" leads:delete" if delete_leads else "") + (" events:write" if events else "") + (" billing:read" if billing else ""), "state":state, "code_challenge":challenge, "code_challenge_method":"S256"})
+        query = urllib.parse.urlencode({"response_type":"code", "client_id":client, "redirect_uri":callback, "scope":scopes or ("account:read notifications:read notifications:write installation:read activity:read leads:read statistics:read" + (" leads:delete" if delete_leads else "") + (" events:write" if events else "") + (" billing:read" if billing else "")), "state":state, "code_challenge":challenge, "code_challenge_method":"S256"})
         url = issuer + "/oauth/authorize?" + query
         def launch():
             try:
@@ -219,6 +219,65 @@ def authorize(issuer, client, browser, timeout, delete_leads=False, events=False
                 raise
             raise Failure("login_uncertain", "A grant may have been created. Check your account connections and revoke any unintended connection before retrying.", 3) from None
 
+def granted_scopes(access):
+    try:
+        encoded = access.split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        scopes = claims["scopes"]
+        if not isinstance(scopes, list) or not scopes or any(not isinstance(scope, str) or not scope for scope in scopes):
+            raise ValueError()
+        return set(scopes)
+    except (IndexError, ValueError, TypeError, KeyError):
+        raise Failure("scope_unknown", "Cannot determine existing permissions. The connection remains unchanged.", 3) from None
+
+def account_id(account):
+    if not isinstance(account, dict) or type(account.get("id")) is not int:
+        raise Failure("account_unknown", "Cannot verify the connected account.", 3)
+    return account["id"]
+
+def upgrade(args, issuer, store, original):
+    additions = {scope for selected, scope in ((args.delete_leads, "leads:delete"), (args.events, "events:write"), (args.billing, "billing:read")) if selected}
+    if not additions:
+        raise Failure("permissions_required", "Select at least one permission to add.", 2)
+    if original.get("refresh_pending"):
+        raise Failure("refresh_uncertain", "The existing refresh outcome is unknown. Recover the connection before adding permissions.", 3)
+    if time.time() >= original["expires_at"]:
+        original["refresh_pending"] = True
+        store.write(original)
+        original = store.save(request(issuer + "/oauth/token", {"grant_type":"refresh_token", "client_id":args.client_id, "refresh_token":original["refresh_token"]}))
+    old_account = request(issuer + "/api/v1/account", bearer=original["access_token"])
+    old_id = account_id(old_account)
+    scopes = granted_scopes(original["access_token"]) | additions
+    new = authorize(issuer, args.client_id, args.browser_driver, args.callback_timeout, scopes=" ".join(sorted(scopes)))
+    access = new.get("access_token") if isinstance(new, dict) else None
+    try:
+        validated = store.validate(new)
+        new_account = request(issuer + "/api/v1/account", bearer=validated["access_token"])
+        if account_id(new_account) != old_id:
+            raise Failure("account_mismatch", "The approved account differs from the connected account. The existing connection was retained.", 3)
+        if not scopes <= granted_scopes(validated["access_token"]):
+            raise Failure("permissions_missing", "The approved connection did not retain all requested permissions.", 3)
+        store.write(validated)
+    except (Failure, OSError, ValueError, TypeError, KeyringError) as exc:
+        try:
+            saved = store.load()
+        except (Failure, OSError, ValueError, TypeError, KeyringError):
+            raise Failure("storage_uncertain", "Cannot confirm which credential was saved. Check account connections before retrying.", 3) from None
+        if saved != original:
+            raise Failure("storage_uncertain", "Cannot confirm which credential was saved. Check account connections before retrying.", 3) from None
+        if not isinstance(access, str) or not access:
+            raise Failure("login_uncertain", "A grant may have been created. Check account connections before retrying.", 3) from None
+        try:
+            request(issuer + "/api/v1/logout", form={}, bearer=access)
+        except Failure:
+            raise Failure("cleanup_unconfirmed", "The existing connection was retained, but revocation of the new grant could not be confirmed. Check account connections.", 3) from None
+        raise exc
+    try:
+        request(issuer + "/api/v1/logout", form={}, bearer=original["access_token"])
+    except Failure:
+        raise Failure("cleanup_unconfirmed", "The new connection was saved, but revocation of the old grant could not be confirmed. Check account connections.", 3) from None
+    return {"connected": True, "account": new_account}
+
 def run(args):
     issuer = issuer_url(args.issuer or DEFAULT_ISSUER)
     if issuer != DEFAULT_ISSUER and not args.client_id:
@@ -240,8 +299,12 @@ def run(args):
     with store.lock:
         token = store.load()
         if args.command == "auth" and args.action == "login":
-            if token:
-                raise Failure("already_connected", "Connection already exists. Log out before login.")
+            if token and not args.add:
+                raise Failure("already_connected", "Connection already exists. Use auth login --add to add permissions.")
+            if args.add:
+                if not token:
+                    raise Failure("not_connected", "No saved connection. Run auth login first.")
+                return upgrade(args, issuer, store, token)
             token = authorize(issuer, args.client_id, args.browser_driver, args.callback_timeout, args.delete_leads, args.events, args.billing)
             try:
                 validated = store.validate(token)
@@ -381,6 +444,7 @@ def main():
     sub = p.add_subparsers(dest="command", required=True)
     auth = sub.add_parser("auth").add_subparsers(dest="action", required=True)
     login = auth.add_parser("login")
+    login.add_argument("--add", action="store_true", help="add selected permissions to the existing connection")
     login.add_argument("--delete-leads", action="store_true", help="request permission to permanently delete leads during browser consent")
     login.add_argument("--events", action="store_true", help="request permission to submit events")
     login.add_argument("--billing", action="store_true", help="request permission to read billing")

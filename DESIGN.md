@@ -4,4 +4,4 @@ Event commands send the caller's notification ID, session ID, event ID and paylo
 
 Billing status is a read of one page for each of two independent lists. The client passes each opaque cursor through without interpreting it. The server owns eligibility and access decisions. This command performs no checkout operation.
 
-Login retains its existing default scopes. Event and billing scopes are opt-in flags. Existing connection upgrades need account identity verification and safe grant cleanup. Issue #18 tracks that work. This slice does not alter stored credentials when an existing connection attempts login.
+Login retains its existing default scopes. Event and billing scopes are opt-in flags. An explicit `auth login --add` requests the union of the existing token scopes and the selected additions. The protected account endpoint validates each token and supplies the account ID. Under the credential lock, the client compares those IDs, saves the replacement, and revokes the old family. Failed or uncertain cleanup is reported. The client cannot upgrade a connection when it cannot determine the existing scopes or account identity.

@@ -22,6 +22,9 @@ class Server(BaseHTTPRequestHandler):
     reject_logout = False
     drop_refresh_response = False
     login_response = None
+    jwt_mode = False
+    account_number = 42
+    grant_number = 0
     current_refresh = "first"
     operations = []
     reject_next = False
@@ -107,7 +110,13 @@ class Server(BaseHTTPRequestHandler):
                     self.connection.shutdown(2)
                     self.connection.close()
                     return
-            self.respond({'access_token': 'access', 'refresh_token': self.current_refresh, 'expires_in': 60})
+            access = 'access'
+            if self.jwt_mode:
+                if form.get('grant_type') == ['authorization_code']:
+                    type(self).grant_number += 1
+                claims = {'scopes': self.authorization['scope'][0].split(), 'account': self.account_number, 'grant': self.grant_number}
+                access = 'header.' + base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=') + '.signature'
+            self.respond({'access_token': access, 'refresh_token': self.current_refresh, 'expires_in': 60})
         elif self.path == '/api/v1/logout' and self.reject_logout:
             self.respond({'error': 'synthetic-secret-marker'}, 503)
         elif self.path == '/api/v1/logout':
@@ -165,8 +174,17 @@ class Server(BaseHTTPRequestHandler):
             self.respond({'ok': True})
         elif self.path == '/api/v1/account' and self.account_error is not None:
             self.respond({'error': self.account_error}, 503)
-        elif self.path == '/api/v1/account' and self.headers.get('Authorization') == 'Bearer access':
-            self.respond({'id': 42, 'name': 'Example', 'email': 'person@example.test'})
+        elif self.path == '/api/v1/account' and self.headers.get('Authorization', '').startswith('Bearer '):
+            access = self.headers['Authorization'][7:]
+            if self.jwt_mode:
+                part = access.split('.')[1]
+                identity = json.loads(base64.urlsafe_b64decode(part + '=' * (-len(part) % 4)))['account']
+            elif access == 'access':
+                identity = 42
+            else:
+                self.respond({'error': 'unauthorized'}, 401)
+                return
+            self.respond({'id': identity, 'name': 'Example', 'email': 'person@example.test'})
         else:
             self.respond({'error': 'unauthorized'}, 401)
 
@@ -182,6 +200,9 @@ class CLI(unittest.TestCase):
         cls.server.server_close()
     def setUp(self):
         Server.login_response = None
+        Server.jwt_mode = False
+        Server.account_number = 42
+        Server.grant_number = 0
         Server.authorization = None
         Server.reject_refresh = False
         Server.account_error = None
@@ -216,6 +237,100 @@ urllib.request.urlopen(url, timeout=5).read()
     def run_cli(self, *args, env=None):
         result = subprocess.run(self.base + list(args), capture_output=True, text=True, env=env, timeout=10)
         return result, json.loads(result.stdout or result.stderr)
+    def test_permission_upgrade_retains_scope_and_rejects_other_account(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--events', '--browser-driver', str(self.driver))[0].returncode, 0)
+        original = self.creds.read_text()
+        denied = self.run_cli('auth', 'login', '--add', '--billing', '--browser-driver', str(self.driver), env=dict(os.environ, DENY='1'))
+        self.assertEqual(denied[1]['error']['code'], 'authorization_denied')
+        self.assertEqual(self.creds.read_text(), original)
+        Server.account_number = 43
+        wrong = self.run_cli('auth', 'login', '--add', '--billing', '--browser-driver', str(self.driver))
+        self.assertEqual(wrong[1]['error']['code'], 'account_mismatch')
+        self.assertEqual(self.creds.read_text(), original)
+        Server.account_number = 42
+        result, body = self.run_cli('auth', 'login', '--add', '--billing', '--browser-driver', str(self.driver))
+        self.assertEqual(result.returncode, 0, body)
+        self.assertTrue({'events:write', 'billing:read'} <= set(Server.authorization['scope'][0].split()))
+        self.assertNotEqual(self.creds.read_text(), original)
+        self.assertEqual(self.run_cli('auth', 'status')[1]['account']['id'], 42)
+        self.assertEqual(sum(path == '/api/v1/logout' for path, _ in Server.calls), 2)
+
+    def test_upgrade_reports_uncertain_new_grant(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        original = self.creds.read_text()
+        Server.login_response = 'drop'
+        result, body = self.run_cli('auth', 'login', '--add', '--events', '--browser-driver', str(self.driver))
+        self.assertEqual(body['error']['code'], 'login_uncertain')
+        self.assertEqual(self.creds.read_text(), original)
+
+    def test_upgrade_timeout_and_unconfirmed_cleanup(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        original = self.creds.read_text()
+        result, body = self.run_cli('auth', 'login', '--add', '--events', '--browser-driver', str(self.driver), '--callback-timeout', '1', env=dict(os.environ, NO_CALLBACK='1'))
+        self.assertEqual(body['error']['code'], 'callback_timeout')
+        self.assertEqual(self.creds.read_text(), original)
+        Server.account_number = 43
+        Server.reject_logout = True
+        result, body = self.run_cli('auth', 'login', '--add', '--events', '--browser-driver', str(self.driver))
+        self.assertEqual(body['error']['code'], 'cleanup_unconfirmed')
+        self.assertEqual(self.creds.read_text(), original)
+
+    def test_upgrade_save_failure_keeps_original(self):
+        import argparse
+        from unittest.mock import patch
+        import uptible_cli
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        original = self.creds.read_text()
+        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, add=True, delete_leads=False, events=True, billing=False, browser_driver=str(self.driver))
+        with patch.object(uptible_cli.Store, 'write', side_effect=OSError('disk failure')):
+            with self.assertRaises(OSError):
+                uptible_cli.run(args)
+        self.assertEqual(self.creds.read_text(), original)
+        self.assertTrue(any(path == '/api/v1/logout' for path, _ in Server.calls))
+        self.assertEqual(self.run_cli('auth', 'status')[1]['account']['id'], 42)
+
+    def test_upgrade_refreshes_expired_connection_and_blocks_uncertain_refresh(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--events', '--browser-driver', str(self.driver))[0].returncode, 0)
+        saved = json.loads(self.creds.read_text())
+        saved['expires_at'] = 0
+        self.creds.write_text(json.dumps(saved))
+        result, body = self.run_cli('auth', 'login', '--add', '--billing', '--browser-driver', str(self.driver))
+        self.assertEqual(result.returncode, 0, body)
+        self.assertEqual(Server.refreshes, 1)
+        self.assertTrue({'events:write', 'billing:read'} <= set(Server.authorization['scope'][0].split()))
+        saved = json.loads(self.creds.read_text())
+        saved['refresh_pending'] = True
+        self.creds.write_text(json.dumps(saved))
+        before = self.creds.read_text()
+        result, body = self.run_cli('auth', 'login', '--add', '--delete-leads', '--browser-driver', str(self.driver))
+        self.assertEqual(body['error']['code'], 'refresh_uncertain')
+        self.assertEqual(self.creds.read_text(), before)
+
+    def test_upgrade_uncertain_storage_does_not_revoke_saved_grant(self):
+        import argparse
+        from unittest.mock import patch
+        import uptible_cli
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        original = self.creds.read_text()
+        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, add=True, delete_leads=False, events=True, billing=False, browser_driver=str(self.driver))
+        write = uptible_cli.Store.write
+        def save_then_fail(store, value):
+            write(store, value)
+            raise OSError('unknown storage outcome')
+        with patch.object(uptible_cli.Store, 'write', save_then_fail):
+            with self.assertRaises(uptible_cli.Failure) as failure:
+                uptible_cli.run(args)
+        self.assertEqual(failure.exception.code, 'storage_uncertain')
+        self.assertNotEqual(self.creds.read_text(), original)
+        self.assertFalse(any(path == '/api/v1/logout' for path, _ in Server.calls))
+        self.assertEqual(self.run_cli('auth', 'status')[1]['account']['id'], 42)
+
     def test_events_and_billing(self):
         self.assertEqual(self.run_cli('auth', 'login', '--events', '--billing', '--browser-driver', str(self.driver))[0].returncode, 0)
         self.assertTrue({'events:write', 'billing:read'} <= set(Server.authorization['scope'][0].split()))
