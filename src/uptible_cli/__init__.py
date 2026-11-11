@@ -194,7 +194,7 @@ def authorize(issuer, client, browser, timeout, delete_leads=False):
     with HTTPServer(("127.0.0.1", 0), Handler) as server:
         server.timeout = 0.25
         callback = f"http://127.0.0.1:{server.server_port}/callback"
-        query = urllib.parse.urlencode({"response_type":"code", "client_id":client, "redirect_uri":callback, "scope":"account:read notifications:read notifications:write installation:read activity:read leads:read" + (" leads:delete" if delete_leads else ""), "state":state, "code_challenge":challenge, "code_challenge_method":"S256"})
+        query = urllib.parse.urlencode({"response_type":"code", "client_id":client, "redirect_uri":callback, "scope":"account:read notifications:read notifications:write installation:read activity:read leads:read statistics:read" + (" leads:delete" if delete_leads else ""), "state":state, "code_challenge":challenge, "code_challenge_method":"S256"})
         url = issuer + "/oauth/authorize?" + query
         def launch():
             try:
@@ -295,6 +295,8 @@ def run(args):
         if args.command in ("auth", "account"):
             account = authenticated(issuer + "/api/v1/account")
             return {"connected": True, "account": account} if args.command == "auth" else account
+        if args.command == "stats":
+            return authenticated(issuer + "/api/v1/statistics")
         if args.command == "installation":
             return authenticated(issuer + "/api/v1/installation")
         if args.command == "leads":
@@ -366,6 +368,8 @@ def main():
     logout.add_argument("--local", action="store_true", help="forget locally without revoking the server grant")
     account = sub.add_parser("account").add_subparsers(dest="action", required=True)
     account.add_parser("show")
+    stats = sub.add_parser("stats", help="show dashboard statistics").add_subparsers(dest="action", required=True)
+    stats.add_parser("show", description="Show lifetime customer dashboard statistics. Capture counts use active, non-archived owned notifications. Hour and day counts cover the preceding hour and 24 hours in inclusive rolling UTC windows ending at as_of. Tracks include all account history. Results may be cached for one second.")
     installation = sub.add_parser("installation").add_subparsers(dest="action", required=True)
     installation.add_parser("show")
     leads = sub.add_parser("leads", help="browse or permanently delete collected leads").add_subparsers(dest="action", required=True)
