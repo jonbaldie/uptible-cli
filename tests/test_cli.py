@@ -46,6 +46,10 @@ class Server(BaseHTTPRequestHandler):
             elif self.drop_create:
                 self.connection.shutdown(2)
                 self.connection.close()
+            elif self.event_receipt == 'malformed':
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"receipt":')
             else:
                 self.respond(self.event_receipt)
             return
@@ -224,6 +228,10 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(Server.operations[-1], prior)
         Server.event_receipt = {'receipt': 'bad', 'status': 'accepted'}
         self.assertEqual(self.run_cli(*capture)[1]['error']['code'], 'event_uncertain')
+        Server.event_receipt = 'malformed'
+        result, body = self.run_cli(*capture)
+        self.assertEqual(body['error']['code'], 'event_uncertain')
+        self.assertIn('same IDs and payload', body['error']['message'])
         result, body = self.run_cli('billing', 'status', '--cursor', 'a+/=', '--claim-cursor', 'b+/=')
         self.assertEqual(result.returncode, 0)
         self.assertTrue(body['live_access'])
