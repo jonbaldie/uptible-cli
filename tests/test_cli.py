@@ -17,6 +17,9 @@ class Server(BaseHTTPRequestHandler):
     calls = []
     authorization = None
     reject_refresh = False
+    account_error = None
+    refreshes = 0
+    current_refresh = "first"
     def log_message(self, *args):
         pass
     def respond(self, value, status=200):
@@ -38,7 +41,14 @@ class Server(BaseHTTPRequestHandler):
             if form.get('grant_type') == ['refresh_token'] and self.reject_refresh:
                 self.respond({'error': 'invalid_grant'}, 400)
                 return
-            self.respond({'access_token': 'access', 'refresh_token': 'rotated' if form.get('grant_type') == ['refresh_token'] else 'first', 'expires_in': 1})
+            if form.get('grant_type') == ['refresh_token']:
+                type(self).refreshes += 1
+                if form.get('refresh_token') != [self.current_refresh]:
+                    self.respond({'error': 'invalid_grant'}, 400)
+                    return
+                time.sleep(0.3)
+                type(self).current_refresh = 'rotated'
+            self.respond({'access_token': 'access', 'refresh_token': self.current_refresh, 'expires_in': 60})
         elif self.path == '/api/v1/logout':
             self.send_response(204)
             self.end_headers()
@@ -49,6 +59,8 @@ class Server(BaseHTTPRequestHandler):
         if parsed.path == '/oauth/authorize':
             type(self).authorization = urllib.parse.parse_qs(parsed.query)
             self.respond({'ok': True})
+        elif self.path == '/api/v1/account' and self.account_error is not None:
+            self.respond({'error': self.account_error}, 503)
         elif self.path == '/api/v1/account' and self.headers.get('Authorization') == 'Bearer access':
             self.respond({'id': 42, 'name': 'Example', 'email': 'person@example.test'})
         else:
@@ -67,6 +79,10 @@ class CLI(unittest.TestCase):
     def setUp(self):
         Server.authorization = None
         Server.reject_refresh = False
+        Server.account_error = None
+        Server.current_refresh = "first"
+        Server.refreshes = 0
+        Server.calls = []
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name)
@@ -93,7 +109,9 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(body['account']['id'], 42)
         self.assertEqual(self.creds.stat().st_mode & 0o777, 0o600)
-        time.sleep(1.1)
+        value = json.loads(self.creds.read_text())
+        value['expires_at'] = 0
+        self.creds.write_text(json.dumps(value))
         result, body = self.run_cli('account', 'show')
         self.assertEqual(body['id'], 42)
         self.assertEqual(json.loads(self.creds.read_text())['refresh_token'], 'rotated')
@@ -121,7 +139,9 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(body['error']['code'], 'wrong_connection')
     def test_revoked_refresh_is_reported_and_can_be_forgotten(self):
         self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
-        time.sleep(1.1)
+        value = json.loads(self.creds.read_text())
+        value['expires_at'] = 0
+        self.creds.write_text(json.dumps(value))
         Server.reject_refresh = True
         result, body = self.run_cli('account', 'show')
         self.assertEqual(result.returncode, 3)
@@ -130,6 +150,51 @@ urllib.request.urlopen(url, timeout=5).read()
         result, body = self.run_cli('auth', 'logout', '--local')
         self.assertFalse(body['revoked'])
         self.assertFalse(self.creds.exists())
+    def test_login_failure_revokes_and_retry_succeeds(self):
+        Server.account_error = 'synthetic-secret-marker'
+        result, body = self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
+        self.assertEqual(result.returncode, 3)
+        self.assertEqual(body['error']['code'], 'http_error')
+        self.assertNotIn('synthetic-secret-marker', result.stderr)
+        self.assertFalse(self.creds.exists())
+        self.assertTrue(any(path == '/api/v1/logout' for path, _ in Server.calls))
+        Server.account_error = None
+        result, body = self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        before = self.creds.read_bytes()
+        result, body = self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
+        self.assertEqual(body['error']['code'], 'already_connected')
+        self.assertEqual(self.creds.read_bytes(), before)
+
+    def test_aliases_serialize_refresh(self):
+        self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
+        value = json.loads(self.creds.read_text())
+        value['expires_at'] = 0
+        self.creds.write_text(json.dumps(value))
+        alias = self.path / 'alias'
+        alias.symlink_to(self.path, target_is_directory=True)
+        other = self.base.copy()
+        other[other.index(str(self.creds))] = str(alias / 'credentials')
+        processes = [subprocess.Popen(base + ['account', 'show'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for base in (self.base, other)]
+        for process in processes:
+            out, err = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 0, err)
+            self.assertEqual(json.loads(out)['id'], 42)
+        self.assertEqual(Server.refreshes, 1)
+        self.assertEqual(json.loads(self.creds.read_text())['refresh_token'], 'rotated')
+        self.assertEqual(self.run_cli('account', 'show')[0].returncode, 0)
+
+    def test_untrusted_errors_never_reach_diagnostics(self):
+        self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
+        for error in ('synthetic-secret-marker', 'invalid_grant\nsecret', '', 'x' * 500):
+            Server.account_error = error
+            for json_mode in (True, False):
+                base = self.base if json_mode else [x for x in self.base if x != '--json']
+                result = subprocess.run(base + ['account', 'show'], capture_output=True, text=True, timeout=10)
+                self.assertNotIn(error or 'synthetic-secret-marker', result.stderr)
+                if json_mode:
+                    self.assertEqual(json.loads(result.stderr)['error']['code'], 'http_error')
+
     def test_local_logout_is_explicit(self):
         self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
         result, body = self.run_cli('auth', 'logout', '--local')
