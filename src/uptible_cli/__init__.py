@@ -37,11 +37,17 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 OPENER = urllib.request.build_opener(NoRedirect())
 
-def request(url, form=None, bearer=None, method=None, _retry=True):
+def request(url, form=None, bearer=None, method=None, _retry=True, payload=None, extra_headers=None):
     headers = {"Accept": "application/json"}
     if bearer:
         headers["Authorization"] = "Bearer " + bearer
-    data = urllib.parse.urlencode(form).encode() if form is not None else None
+    if extra_headers:
+        headers.update(extra_headers)
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(payload).encode()
+    else:
+        data = urllib.parse.urlencode(form).encode() if form is not None else None
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with OPENER.open(req, timeout=15) as response:
@@ -53,13 +59,24 @@ def request(url, form=None, bearer=None, method=None, _retry=True):
                 time.sleep(int(retry_after))
                 return request(url, bearer=bearer, _retry=False)
         code = "http_error"
+        fields = []
         try:
             payload = json.load(exc)
             if isinstance(payload, dict) and isinstance(payload.get("error"), str) and payload["error"] in SERVER_ERRORS:
                 code = payload["error"]
+            if exc.code == 422 and isinstance(payload, dict) and isinstance(payload.get("errors"), dict):
+                allowed = {"message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions", "revision"}
+                fields = sorted(allowed.intersection(payload["errors"]))
         except (ValueError, OSError):
             pass
-        failure = Failure(code, f"Server rejected request (HTTP {exc.code}).", 3)
+        message = f"Server rejected request (HTTP {exc.code})."
+        if fields:
+            message += " Check these fields: " + ", ".join(fields) + "."
+        if exc.code == 403:
+            message += " Check lifetime access and permissions. If connected before notification commands were available, log out and log in again."
+        elif exc.code == 409:
+            message += " Check the create key or fetch the current revision before retrying."
+        failure = Failure(code, message, 3)
         failure.http_status = exc.code
         raise failure from None
     except (urllib.error.URLError, TimeoutError, OSError, ValueError):
@@ -177,7 +194,7 @@ def authorize(issuer, client, browser, timeout):
     with HTTPServer(("127.0.0.1", 0), Handler) as server:
         server.timeout = 0.25
         callback = f"http://127.0.0.1:{server.server_port}/callback"
-        query = urllib.parse.urlencode({"response_type":"code", "client_id":client, "redirect_uri":callback, "scope":"account:read", "state":state, "code_challenge":challenge, "code_challenge_method":"S256"})
+        query = urllib.parse.urlencode({"response_type":"code", "client_id":client, "redirect_uri":callback, "scope":"account:read notifications:read notifications:write installation:read activity:read", "state":state, "code_challenge":challenge, "code_challenge_method":"S256"})
         url = issuer + "/oauth/authorize?" + query
         def launch():
             try:
@@ -248,8 +265,67 @@ def run(args):
             request(issuer + "/api/v1/logout", form={}, bearer=token["access_token"])
             store.delete()
             return {"connected": False, "revoked": True}
-        account = request(issuer + "/api/v1/account", bearer=token["access_token"])
-        return {"connected": True, "account": account} if args.command == "auth" else account
+        def authenticated(url, **kwargs):
+            nonlocal token
+            try:
+                return request(url, bearer=token["access_token"], **kwargs)
+            except Failure as exc:
+                if getattr(exc, "http_status", None) == 401:
+                    token["refresh_pending"] = True
+                    store.write(token)
+                    token = store.save(request(issuer + "/oauth/token", {"grant_type": "refresh_token", "client_id": args.client_id, "refresh_token": token["refresh_token"]}))
+                    if kwargs.get("method"):
+                        raise Failure("operation_not_retried", "The connection was refreshed. The write was not retried; check current state before retrying. For create, reuse the same key and input.", 3) from None
+                    return request(url, bearer=token["access_token"], **kwargs)
+                if (exc.code == "network_error" or getattr(exc, "http_status", 0) >= 500) and args.command == "notifications" and args.action == "create":
+                    raise Failure("create_uncertain", "The create outcome is unknown. Retry the same input with the same idempotency key.", 3) from None
+                raise
+        if args.command in ("auth", "account"):
+            account = authenticated(issuer + "/api/v1/account")
+            return {"connected": True, "account": account} if args.command == "auth" else account
+        if args.command == "installation":
+            return authenticated(issuer + "/api/v1/installation")
+        path = issuer + "/api/v1/notifications"
+        if args.action == "list":
+            params = {"limit": args.limit}
+            if args.after is not None:
+                params["after"] = args.after
+            return authenticated(path + "?" + urllib.parse.urlencode(params))
+        if args.action == "create":
+            return authenticated(path, method="POST", payload=notification_payload(args), extra_headers={"Idempotency-Key": args.idempotency_key})
+        path += "/" + str(args.id)
+        if args.action == "show":
+            return authenticated(path)
+        if args.action == "activity":
+            return authenticated(path + "/activity")
+        if args.action == "edit":
+            payload = notification_payload(args)
+            payload["revision"] = args.revision
+            return authenticated(path, method="PUT", payload=payload)
+        return authenticated(path + "/" + args.action, method="PUT", payload={})
+
+def notification_payload(args):
+    return {name: getattr(args, name) for name in ("message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions") if getattr(args, name) is not None}
+
+def positive(value):
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be positive")
+    return number
+
+def create_key(value):
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", value):
+        raise argparse.ArgumentTypeError("use 1 to 128 ASCII letters, digits, periods, underscores or hyphens")
+    return value
+
+def notification_fields(parser):
+    parser.add_argument("--message", required=True)
+    parser.add_argument("--url-capture")
+    parser.add_argument("--url-display")
+    parser.add_argument("--display-maps-only", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--custom-delay-x-seconds", type=int)
+    parser.add_argument("--display-last-x-conversions", type=int)
 
 def main():
     p = argparse.ArgumentParser(prog="uptible", description="Connect to an Uptible account.")
@@ -269,6 +345,22 @@ def main():
     logout.add_argument("--local", action="store_true", help="forget locally without revoking the server grant")
     account = sub.add_parser("account").add_subparsers(dest="action", required=True)
     account.add_parser("show")
+    installation = sub.add_parser("installation").add_subparsers(dest="action", required=True)
+    installation.add_parser("show")
+    notifications = sub.add_parser("notifications").add_subparsers(dest="action", required=True)
+    listing = notifications.add_parser("list")
+    listing.add_argument("--limit", type=positive, default=20, choices=range(1, 101), metavar="1-100")
+    listing.add_argument("--after", type=positive)
+    create = notifications.add_parser("create")
+    create.add_argument("--idempotency-key", required=True, type=create_key, help="stable unique key to reuse if the outcome is uncertain")
+    notification_fields(create)
+    edit = notifications.add_parser("edit")
+    edit.add_argument("id", type=positive)
+    edit.add_argument("--revision", type=positive, required=True)
+    notification_fields(edit)
+    for action in ("show", "activity", "activate", "deactivate", "archive", "restore"):
+        command = notifications.add_parser(action)
+        command.add_argument("id", type=positive)
     args = p.parse_args()
     try:
         result = run(args)
