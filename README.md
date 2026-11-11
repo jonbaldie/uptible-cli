@@ -77,6 +77,19 @@ Exit codes are `0` for success, `2` for usage or configuration errors, `3` for s
 
 ## Current limitations
 
+| Operation | Command |
+| --- | --- |
+| Connect, check, or disconnect an account | `uptible auth login`, `uptible auth status`, `uptible auth logout` |
+| Show account | `uptible account show` |
+| List, show, or create notifications | `uptible notifications list`, `uptible notifications show`, `uptible notifications create` |
+| Update notification settings | `uptible notifications edit` |
+| Activate or deactivate a notification | `uptible notifications activate`, `uptible notifications deactivate` |
+| Archive or restore a notification | `uptible notifications archive`, `uptible notifications restore` |
+| Show installation details | `uptible installation show` |
+| Show notification activity | `uptible notifications activity` |
+| Permanently delete or preview a notification | Not implemented |
+| Modify an account, manage leads, view broader statistics or events, or manage billing | Not implemented |
+
 The connection routes are experimental and may change before a public API contract is published. Leads, statistics, events, billing, permanent notification deletion, and other account operations are not implemented. Full command coverage, server compatibility, reproducible release dependencies and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
 
 ## Development
