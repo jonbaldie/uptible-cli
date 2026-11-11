@@ -27,6 +27,7 @@ class Server(BaseHTTPRequestHandler):
     reject_next = False
     drop_create = False
     api_error = None
+    statistics = {'hour_captures_count': 1, 'captures_count': 2, 'all_captures_count': 3, 'tracks_count': 4, 'as_of': '2026-01-02T00:00:00Z', 'hour_start': '2026-01-01T23:00:00Z', 'day_start': '2026-01-01T00:00:00Z'}
     def log_message(self, *args):
         pass
     def respond(self, value, status=200):
@@ -121,6 +122,13 @@ class Server(BaseHTTPRequestHandler):
             type(self).reject_next = False
             self.respond({'error': 'unauthorized'}, 401)
             return
+        if self.path == '/api/v1/statistics':
+            self.operations.append(('GET', self.path))
+            if self.api_error:
+                self.respond(self.api_error[1], self.api_error[0])
+            else:
+                self.respond(self.statistics)
+            return
         if self.path.startswith(('/api/v1/notifications', '/api/v1/leads')) or self.path == '/api/v1/installation':
             self.operations.append(('GET', self.path))
             self.respond({'path': self.path})
@@ -203,9 +211,44 @@ urllib.request.urlopen(url, timeout=5).read()
             self.assertIn(str(status), body['error']['message'])
             self.assertNotIn('secret marker', result.stderr)
 
+    def test_statistics_output_authentication_and_errors(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        result, body = self.run_cli('stats', 'show')
+        self.assertEqual((result.returncode, body), (0, Server.statistics))
+        self.assertEqual(Server.operations, [('GET', '/api/v1/statistics')])
+        human = subprocess.run([x for x in self.base if x != '--json'] + ['stats', 'show'], capture_output=True, text=True, timeout=10)
+        self.assertEqual(human.returncode, 0)
+        self.assertEqual(json.loads(human.stdout), Server.statistics)
+        self.assertIn('\n  "all_captures_count"', human.stdout)
+        value = json.loads(self.creds.read_text())
+        value['expires_at'] = 0
+        self.creds.write_text(json.dumps(value))
+        self.assertEqual(self.run_cli('stats', 'show')[1], Server.statistics)
+        self.assertEqual(Server.refreshes, 1)
+        Server.reject_next = True
+        self.assertEqual(self.run_cli('stats', 'show')[1], Server.statistics)
+        self.assertEqual(Server.refreshes, 2)
+        for status in (403, 429, 503):
+            Server.api_error = (status, {'error': 'synthetic-secret-marker'})
+            before = len(Server.operations)
+            result, body = self.run_cli('stats', 'show')
+            self.assertEqual(result.returncode, 3)
+            self.assertIn(str(status), body['error']['message'])
+            self.assertNotIn('synthetic-secret-marker', result.stderr)
+            self.assertNotIn('rotated', result.stderr)
+            self.assertEqual(len(Server.operations) - before, 2 if status in (429, 503) else 1)
+            if status == 403:
+                self.assertIn('auth logout then auth login', body['error']['message'])
+        Server.api_error = None
+        Server.reject_next = True
+        Server.reject_refresh = True
+        result, body = self.run_cli('stats', 'show')
+        self.assertEqual((result.returncode, body['error']['code']), (3, 'invalid_grant'))
+        self.assertNotIn('rotated', result.stderr)
+
     def test_notification_commands_and_recovery(self):
         self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
-        self.assertEqual(set(Server.authorization['scope'][0].split()), {'account:read', 'notifications:read', 'notifications:write', 'installation:read', 'activity:read', 'leads:read'})
+        self.assertEqual(set(Server.authorization['scope'][0].split()), {'account:read', 'notifications:read', 'notifications:write', 'installation:read', 'activity:read', 'leads:read', 'statistics:read'})
         for _ in range(2):
             result, body = self.run_cli('notifications', 'create', '--idempotency-key', 'order-123', '--message', 'Hello', '--no-display-maps-only')
             self.assertEqual((result.returncode, body['id']), (0, 7))

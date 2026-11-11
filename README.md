@@ -35,6 +35,12 @@ When refresh is enabled on the server, the CLI refreshes an expired access crede
 
 `uptible leads delete 123` permanently deletes one lead after confirmation. Use `--yes` to confirm in a noninteractive session. Ordinary login grants lead reading, not deletion. To request deletion permission, run `uptible auth logout` and then `uptible auth login --delete-leads`, and approve the browser consent. Existing connections retain their original permissions. Reading requires lifetime access; deletion permission allows deletion of owned leads even after access ends. If a deletion outcome is unknown, check the lead before deciding whether to retry. A lead that is already gone returns 404.
 
+## Read dashboard statistics
+
+Run `uptible stats show` to read dashboard statistics. This requires lifetime access. Capture counts include currently active, non-archived notifications owned by your account. The hour and day counts cover inclusive rolling UTC intervals ending at `as_of`, spanning the preceding hour and 24 hours. Tracks include all account history, including tracks for inactive, archived, or deleted notifications. The server may cache results for up to one second. `as_of` identifies the window end, not a transactional snapshot.
+
+Ordinary login requests statistics read permission. Existing connections retain their permissions. If statistics returns HTTP 403, check lifetime access. If your connection lacks permission, run `uptible auth logout` and then `uptible auth login` to approve the new permission.
+
 ## Configure a notification
 
 Create a draft with a unique key that you keep with the request. If the response is lost, repeat the exact command with the same key. A key identifies one create operation, so use a new key for a different notification.
@@ -91,13 +97,14 @@ Exit codes are `0` for success, `2` for usage or configuration errors, `3` for s
 | Update notification settings | `uptible notifications edit` |
 | Activate or deactivate a notification | `uptible notifications activate`, `uptible notifications deactivate` |
 | Archive or restore a notification | `uptible notifications archive`, `uptible notifications restore` |
+| Show dashboard statistics | `uptible stats show` |
 | Show installation details | `uptible installation show` |
 | Show notification activity | `uptible notifications activity` |
 | List, show, or permanently delete leads | `uptible leads list`, `uptible leads show`, `uptible leads delete` |
 | Permanently delete or preview a notification | Not implemented |
 | Modify an account, view broader statistics or events, or manage billing | Not implemented |
 
-The connection routes are experimental and may change before a public API contract is published. Statistics, events, billing, permanent notification deletion, and other account operations are not implemented. Full command coverage, server compatibility, reproducible release dependencies and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
+The connection routes are experimental and may change before a public API contract is published. Events, billing, permanent notification deletion, and other account operations are not implemented. Full command coverage, server compatibility, reproducible release dependencies and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
 
 ## Development
 
