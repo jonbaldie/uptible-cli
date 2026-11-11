@@ -230,7 +230,11 @@ def run(args):
         if not sys.stdin.isatty():
             raise Failure("confirmation_required", "Deletion requires confirmation. Use --yes for noninteractive deletion.", 2)
         print(f"Permanently delete lead {args.id}? [y/N] ", end="", file=sys.stderr, flush=True)
-        if input().strip().lower() not in ("y", "yes"):
+        try:
+            answer = input().strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("y", "yes"):
             raise Failure("delete_cancelled", "Deletion cancelled.")
     store = Store(issuer, args.client_id, args.profile, args.credential_file)
     with store.lock:

@@ -436,6 +436,20 @@ class DefaultRouting(unittest.TestCase):
         self.assertEqual(authorize.call_args.args[:2], ('https://uptible.com', '5af9087d-4c3a-4bb9-a144-3cbf5560771a'))
         self.assertEqual(request.call_args.args[0], 'https://uptible.com/api/v1/account')
 
+    def test_delete_eof_cancels_without_accessing_connection(self):
+        from contextlib import redirect_stderr
+        from io import StringIO
+        from unittest.mock import patch
+        import uptible_cli
+
+        with patch.object(sys, 'argv', ['uptible', '--json', 'leads', 'delete', '7']), \
+             patch.object(sys.stdin, 'isatty', return_value=True), \
+             patch('builtins.input', side_effect=EOFError), \
+             patch.object(uptible_cli, 'Store') as store, redirect_stderr(StringIO()) as error:
+            self.assertEqual(uptible_cli.main(), 1)
+        store.assert_not_called()
+        self.assertIn('Deletion cancelled', error.getvalue())
+
     def test_alternate_service_requires_explicit_client(self):
         from contextlib import redirect_stderr
         from io import StringIO

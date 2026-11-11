@@ -95,7 +95,7 @@ Exit codes are `0` for success, `2` for usage or configuration errors, `3` for s
 | Show notification activity | `uptible notifications activity` |
 | List, show, or permanently delete leads | `uptible leads list`, `uptible leads show`, `uptible leads delete` |
 | Permanently delete or preview a notification | Not implemented |
-| Modify an account, manage leads, view broader statistics or events, or manage billing | Not implemented |
+| Modify an account, view broader statistics or events, or manage billing | Not implemented |
 
 The connection routes are experimental and may change before a public API contract is published. Statistics, events, billing, permanent notification deletion, and other account operations are not implemented. Full command coverage, server compatibility, reproducible release dependencies and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
 
