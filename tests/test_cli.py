@@ -19,6 +19,8 @@ class Server(BaseHTTPRequestHandler):
     reject_refresh = False
     account_error = None
     refreshes = 0
+    reject_logout = False
+    drop_refresh_response = False
     current_refresh = "first"
     def log_message(self, *args):
         pass
@@ -48,7 +50,13 @@ class Server(BaseHTTPRequestHandler):
                     return
                 time.sleep(0.3)
                 type(self).current_refresh = 'rotated'
+                if self.drop_refresh_response:
+                    self.connection.shutdown(2)
+                    self.connection.close()
+                    return
             self.respond({'access_token': 'access', 'refresh_token': self.current_refresh, 'expires_in': 60})
+        elif self.path == '/api/v1/logout' and self.reject_logout:
+            self.respond({'error': 'synthetic-secret-marker'}, 503)
         elif self.path == '/api/v1/logout':
             self.send_response(204)
             self.end_headers()
@@ -82,6 +90,8 @@ class CLI(unittest.TestCase):
         Server.account_error = None
         Server.current_refresh = "first"
         Server.refreshes = 0
+        Server.reject_logout = False
+        Server.drop_refresh_response = False
         Server.calls = []
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -147,9 +157,30 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(result.returncode, 3)
         self.assertEqual(body['error']['code'], 'invalid_grant')
         self.assertTrue(self.creds.exists())
+        saved = json.loads(self.creds.read_text())
+        self.assertEqual(saved['refresh_token'], 'first')
+        count = len(Server.calls)
+        result, body = self.run_cli('account', 'show')
+        self.assertEqual(body['error']['code'], 'refresh_uncertain')
+        self.assertEqual(len(Server.calls), count)
         result, body = self.run_cli('auth', 'logout', '--local')
         self.assertFalse(body['revoked'])
         self.assertFalse(self.creds.exists())
+    def test_lost_refresh_response_is_not_replayed(self):
+        self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
+        saved = json.loads(self.creds.read_text())
+        saved['expires_at'] = 0
+        self.creds.write_text(json.dumps(saved))
+        Server.drop_refresh_response = True
+        result, body = self.run_cli('account', 'show')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(Server.refreshes, 1)
+        self.assertEqual(json.loads(self.creds.read_text())['refresh_token'], 'first')
+        result, body = self.run_cli('account', 'show')
+        self.assertEqual(body['error']['code'], 'refresh_uncertain')
+        self.assertEqual(Server.refreshes, 1)
+        self.assertEqual(self.run_cli('auth', 'logout', '--local')[0].returncode, 0)
+
     def test_login_failure_revokes_and_retry_succeeds(self):
         Server.account_error = 'synthetic-secret-marker'
         result, body = self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
@@ -165,6 +196,16 @@ urllib.request.urlopen(url, timeout=5).read()
         result, body = self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
         self.assertEqual(body['error']['code'], 'already_connected')
         self.assertEqual(self.creds.read_bytes(), before)
+
+    def test_login_reports_unconfirmed_revocation(self):
+        Server.account_error = 'unavailable'
+        Server.reject_logout = True
+        result, body = self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
+        self.assertEqual(result.returncode, 3)
+        self.assertEqual(body['error']['code'], 'cleanup_unconfirmed')
+        self.assertIn('Revoke the connection', body['error']['message'])
+        self.assertFalse(self.creds.exists())
+        self.assertNotIn('synthetic-secret-marker', result.stderr)
 
     def test_aliases_serialize_refresh(self):
         self.run_cli('auth', 'login', '--browser-driver', str(self.driver))

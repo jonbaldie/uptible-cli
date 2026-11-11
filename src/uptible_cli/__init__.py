@@ -22,6 +22,7 @@ from filelock import FileLock, Timeout
 from keyring.errors import KeyringError
 
 VERSION = "0.1.0"
+SERVER_ERRORS = {"invalid_request", "invalid_client", "invalid_grant", "unauthorized_client", "unsupported_grant_type", "invalid_scope", "access_denied", "temporarily_unavailable", "server_error"}
 
 class Failure(Exception):
     def __init__(self, code, message, exit_code=1):
@@ -52,7 +53,7 @@ def request(url, form=None, bearer=None, method=None, _retry=True):
         code = "http_error"
         try:
             payload = json.load(exc)
-            if isinstance(payload, dict) and isinstance(payload.get("error"), str):
+            if isinstance(payload, dict) and isinstance(payload.get("error"), str) and payload["error"] in SERVER_ERRORS:
                 code = payload["error"]
         except (ValueError, OSError):
             pass
@@ -69,7 +70,8 @@ def issuer_url(value):
 class Store:
     def __init__(self, issuer, client, profile, filename):
         self.identity = hashlib.sha256(json.dumps([issuer, client, profile], separators=(",", ":")).encode()).hexdigest()
-        self.path = Path(filename).expanduser() if filename else None
+        path = Path(filename).expanduser() if filename else None
+        self.path = path.parent.resolve() / path.name if path else None
         self.keyring = None
         directory = self.path.parent if self.path else Path.home() / ".cache" / "uptible-cli"
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -107,10 +109,17 @@ class Store:
             raise Failure("wrong_connection", "Credential file belongs to another connection.")
         return value
 
-    def save(self, token):
+    def validate(self, token):
         if not isinstance(token, dict) or not isinstance(token.get("access_token"), str) or not isinstance(token.get("refresh_token"), str) or not isinstance(token.get("expires_in"), (int, float)) or token["expires_in"] <= 0:
             raise Failure("invalid_token_response", "Server did not return usable access and refresh credentials.", 3)
-        value = {"identity": self.identity, "access_token": token["access_token"], "refresh_token": token["refresh_token"], "expires_at": time.time() + token["expires_in"]}
+        return {"identity": self.identity, "access_token": token["access_token"], "refresh_token": token["refresh_token"], "expires_at": time.time() + token["expires_in"]}
+
+    def save(self, token):
+        value = self.validate(token)
+        self.write(value)
+        return value
+
+    def write(self, value):
         encoded = json.dumps(value)
         if self.keyring:
             self.keyring.set_password("uptible-cli", self.identity, encoded)
@@ -125,7 +134,6 @@ class Store:
             finally:
                 if os.path.exists(tmp):
                     os.unlink(tmp)
-        return value
 
     def delete(self):
         if self.path:
@@ -194,8 +202,18 @@ def run(args):
             if token:
                 raise Failure("already_connected", "Connection already exists. Log out before login.")
             token = authorize(issuer, args.client_id, args.browser_driver, args.callback_timeout)
-            token = store.save(token)
-            account = request(issuer + "/api/v1/account", bearer=token["access_token"])
+            try:
+                validated = store.validate(token)
+                account = request(issuer + "/api/v1/account", bearer=validated["access_token"])
+                store.save(token)
+            except (Failure, OSError, ValueError, TypeError, KeyringError) as exc:
+                access = token.get("access_token") if isinstance(token, dict) else None
+                if isinstance(access, str) and access:
+                    try:
+                        request(issuer + "/api/v1/logout", form={}, bearer=access)
+                    except Failure:
+                        raise Failure("cleanup_unconfirmed", "Login failed and grant revocation could not be confirmed. Revoke the connection in your account before retrying.", 3) from None
+                raise exc
             return {"connected": True, "account": account}
         if args.command == "auth" and args.action == "logout" and args.local:
             store.delete()
@@ -204,7 +222,11 @@ def run(args):
             if args.command == "auth" and args.action == "status":
                 return {"connected": False}
             raise Failure("not_connected", "No saved connection. Run auth login.")
+        if token.get("refresh_pending"):
+            raise Failure("refresh_uncertain", "A refresh may have been consumed. Revoke the connection in your account, then use auth logout --local and reconnect.", 3)
         if time.time() >= token["expires_at"]:
+            token["refresh_pending"] = True
+            store.write(token)
             token = store.save(request(issuer + "/oauth/token", {"grant_type":"refresh_token", "client_id":args.client_id, "refresh_token":token["refresh_token"]}))
         if args.command == "auth" and args.action == "logout":
             request(issuer + "/api/v1/logout", form={}, bearer=token["access_token"])
