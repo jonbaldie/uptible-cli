@@ -4,7 +4,14 @@ Use `uptible` to connect an Uptible account from your terminal, check the connec
 
 ## Install
 
-You need Python 3.10 or later and pip. From a checkout of this repository, create a virtual environment and install the CLI:
+On macOS, install with Homebrew:
+
+```sh
+brew install jonbaldie/tap/uptible
+uptible --version
+```
+
+To build from a checkout instead, you need Python 3.10 or later:
 
 ```sh
 python3 -m venv .venv
@@ -13,11 +20,11 @@ source .venv/bin/activate
 uptible --version
 ```
 
-This installs from the checkout. There is no published release or update channel yet. The CLI has been exercised on macOS only.
+The CLI has been exercised on macOS only.
 
 ## Connect your account
 
-This is a prerelease. The public service and distribution are not yet available. Once the service is available, run:
+Connect the CLI to your Uptible account:
 
 ```sh
 uptible auth login
