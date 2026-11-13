@@ -1200,7 +1200,7 @@ class DefaultRouting(unittest.TestCase):
                 return None
             def validate(self, token):
                 return token
-            def save(self, token):
+            def write(self, token):
                 pass
 
         with patch.object(sys, 'argv', ['uptible', 'auth', 'login']), \

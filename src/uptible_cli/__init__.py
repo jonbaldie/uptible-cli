@@ -138,11 +138,6 @@ class Store:
             raise Failure("invalid_token_response", "Server did not return usable access and refresh credentials.", 3)
         return {"identity": self.identity, "access_token": token["access_token"], "refresh_token": token["refresh_token"], "expires_at": time.time() + token["expires_in"]}
 
-    def save(self, token):
-        value = self.validate(token)
-        self.write(value)
-        return value
-
     def write(self, value):
         encoded = json.dumps(value)
         if self.keyring:
@@ -248,6 +243,28 @@ def token_subject(access):
     except (IndexError, ValueError, TypeError, KeyError):
         raise Failure("account_unknown", "Cannot verify the connected account. The connection remains unchanged.", 3) from None
 
+def refresh_connection(issuer, client, store, original, scopes=None):
+    old_id = original.get("account_id")
+    if type(old_id) is not int:
+        old_id = token_subject(original["access_token"])
+    original["refresh_pending"] = True
+    store.write(original)
+    refreshed = store.validate(request(issuer + "/oauth/token", {"grant_type":"refresh_token", "client_id":client, "refresh_token":original["refresh_token"]}))
+    try:
+        if scopes is not None:
+            refreshed_scopes = granted_scopes(refreshed["access_token"])
+        account = request(issuer + "/api/v1/account", bearer=refreshed["access_token"])
+        refreshed_id = account_id(account)
+    except Failure:
+        raise Failure("refresh_uncertain", "Cannot verify the refreshed connection. Revoke the connection in your account and reconnect.", 3) from None
+    if scopes is not None and refreshed_scopes != scopes:
+        raise Failure("refresh_permissions_changed", "The refreshed connection has different permissions. Revoke the connection in your account and reconnect.", 3)
+    if refreshed_id != old_id:
+        raise Failure("refresh_account_changed", "The refreshed connection belongs to a different account. It was not saved. Revoke the connection in your account and reconnect.", 3)
+    refreshed["account_id"] = old_id
+    store.write(refreshed)
+    return refreshed, account
+
 def upgrade(args, issuer, store, original):
     additions = {scope for selected, scope in ((args.delete_leads, "leads:delete"), (args.events, "events:write"), (args.billing, "billing:read"), (args.delete_notifications, "notifications:delete")) if selected}
     if not additions:
@@ -256,22 +273,7 @@ def upgrade(args, issuer, store, original):
         raise Failure("refresh_uncertain", "The existing refresh outcome is unknown. Recover the connection before adding permissions.", 3)
     old_scopes = granted_scopes(original["access_token"])
     if time.time() >= original["expires_at"]:
-        old_subject = token_subject(original["access_token"])
-        original["refresh_pending"] = True
-        store.write(original)
-        refreshed = store.validate(request(issuer + "/oauth/token", {"grant_type":"refresh_token", "client_id":args.client_id, "refresh_token":original["refresh_token"]}))
-        try:
-            refreshed_scopes = granted_scopes(refreshed["access_token"])
-            old_account = request(issuer + "/api/v1/account", bearer=refreshed["access_token"])
-            refreshed_id = account_id(old_account)
-        except Failure:
-            raise Failure("refresh_uncertain", "Cannot verify the refreshed connection. Revoke the connection in your account and reconnect.", 3) from None
-        if refreshed_scopes != old_scopes:
-            raise Failure("refresh_permissions_changed", "The refreshed connection has different permissions. Revoke the connection in your account and reconnect.", 3)
-        if refreshed_id != old_subject:
-            raise Failure("refresh_account_changed", "The refreshed connection belongs to a different account. It was not saved. Revoke the connection in your account and reconnect.", 3)
-        store.write(refreshed)
-        original = refreshed
+        original, old_account = refresh_connection(issuer, args.client_id, store, original, old_scopes)
     else:
         old_account = request(issuer + "/api/v1/account", bearer=original["access_token"])
     old_id = account_id(old_account)
@@ -288,6 +290,7 @@ def upgrade(args, issuer, store, original):
             raise Failure("permissions_missing", "The approved connection did not retain all requested permissions.", 3)
         if approved_scopes != scopes:
             raise Failure("permissions_unexpected", "The approved connection included unrequested permissions. The existing connection was retained.", 3)
+        validated["account_id"] = old_id
         store.write(validated)
     except (Failure, OSError, ValueError, TypeError, KeyringError) as exc:
         try:
@@ -349,7 +352,8 @@ def run(args):
             try:
                 validated = store.validate(token)
                 account = request(issuer + "/api/v1/account", bearer=validated["access_token"])
-                store.save(token)
+                validated["account_id"] = account_id(account)
+                store.write(validated)
             except (Failure, OSError, ValueError, TypeError, KeyringError) as exc:
                 access = token.get("access_token") if isinstance(token, dict) else None
                 if isinstance(access, str) and access:
@@ -371,9 +375,7 @@ def run(args):
         if token.get("refresh_pending"):
             raise Failure("refresh_uncertain", "A refresh may have been consumed. Revoke the connection in your account, then use auth logout --local and reconnect.", 3)
         if time.time() >= token["expires_at"]:
-            token["refresh_pending"] = True
-            store.write(token)
-            token = store.save(request(issuer + "/oauth/token", {"grant_type":"refresh_token", "client_id":args.client_id, "refresh_token":token["refresh_token"]}))
+            token, _ = refresh_connection(issuer, args.client_id, store, token)
         if args.command == "auth" and args.action == "logout":
             request(issuer + "/api/v1/logout", form={}, bearer=token["access_token"])
             store.delete()
@@ -384,9 +386,7 @@ def run(args):
                 return request(url, bearer=token["access_token"], **kwargs)
             except Failure as exc:
                 if getattr(exc, "http_status", None) == 401:
-                    token["refresh_pending"] = True
-                    store.write(token)
-                    token = store.save(request(issuer + "/oauth/token", {"grant_type": "refresh_token", "client_id": args.client_id, "refresh_token": token["refresh_token"]}))
+                    token, _ = refresh_connection(issuer, args.client_id, store, token)
                     if kwargs.get("method"):
                         if args.command == "notifications" and args.action == "delete":
                             raise Failure("operation_not_retried", "The connection was refreshed. The deletion was not retried. Check the notification before deciding whether to retry.", 3) from None
