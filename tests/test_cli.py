@@ -300,6 +300,8 @@ class Server(BaseHTTPRequestHandler):
             self.connection.close()
         elif self.api_error:
             self.respond(self.api_error[1], self.api_error[0])
+        elif self.delete_success_status != 204:
+            self.respond({'status': 'accepted'}, self.delete_success_status)
         else:
             self.send_response(204)
             self.end_headers()
@@ -833,6 +835,10 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(Server.operations[-1], prior)
         Server.event_receipt = {'receipt': 'bad', 'status': 'accepted'}
         self.assertEqual(self.run_cli(*capture)[1]['error']['code'], 'event_uncertain')
+        for receipt in ({}, {'receipt': 'valid'}, {'status': 'processed'}, {'receipt': '', 'status': 'processed'}):
+            Server.event_receipt = receipt
+            result, body = self.run_cli(*capture)
+            self.assertEqual((result.returncode, body['error']['code']), (3, 'event_uncertain'))
         Server.event_receipt = 'malformed'
         result, body = self.run_cli(*capture)
         self.assertEqual(body['error']['code'], 'event_uncertain')
@@ -870,6 +876,13 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(body['error']['code'], 'delete_uncertain')
         self.assertEqual(Server.operations.count(('DELETE', '/api/v1/leads/7')), 2)
         Server.drop_create = False
+        for status in (200, 202):
+            Server.delete_success_status = status
+            before = len(Server.operations)
+            result, body = self.run_cli('leads', 'delete', '7', '--yes')
+            self.assertEqual((result.returncode, body['error']['code']), (3, 'delete_uncertain'))
+            self.assertEqual(len(Server.operations) - before, 1)
+        Server.delete_success_status = 204
         for status in (403, 404, 422, 429):
             Server.api_error = (status, {'errors': {'secret': ['secret marker']}})
             result, body = self.run_cli('leads', 'delete', '7', '--yes')
@@ -1640,7 +1653,7 @@ urllib.request.urlopen(url, timeout=5).read()
             result, body = self.run_cli('notifications', 'create', '--idempotency-key', 'order-123', '--message', 'Hello', '--no-display-maps-only')
             self.assertEqual((result.returncode, body['id']), (0, 7))
         self.assertEqual(Server.operations[0], Server.operations[1])
-        self.assertEqual(Server.operations[0][2:], ('order-123', {'message': 'Hello', 'display_maps_only': False}))
+        self.assertEqual(Server.operations[0][2:], ('order-123', {'message': 'Hello', 'display_maps_only': 0}))
         result, body = self.run_cli('notifications', 'edit', '7', '--revision', '1', '--message', 'Changed')
         self.assertEqual(result.returncode, 3)
         self.assertIn('revision', body['error']['message'])
@@ -1711,7 +1724,7 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
         fields = ['message', 'url_capture', 'url_display', 'display_maps_only', 'custom_delay_x_seconds',
                   'display_last_x_conversions', 'revision', 'email', 'name', 'session_id', 'event_id',
-                  'limit', 'after', 'notification_id', 'from', 'until', 'cursor', 'claim_cursor']
+                  'limit', 'after', 'before', 'archived', 'state', 'notification_id', 'from', 'until', 'cursor', 'claim_cursor']
         errors = {field: ['synthetic-secret-marker'] for field in fields}
         errors['synthetic-private-field'] = ['synthetic-secret-marker']
         Server.api_error = (422, {'code': 'validation_error', 'errors': errors})

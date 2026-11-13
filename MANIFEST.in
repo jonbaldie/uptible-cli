@@ -1,0 +1,7 @@
+include docs/contracts/manifest.json
+include docs/contracts/v1.1.0.json
+include docs/contracts/cli-operations.json
+include docs/contracts/README.md
+include DESIGN.md
+include CHANGELOG.md
+include docs/capabilities.md

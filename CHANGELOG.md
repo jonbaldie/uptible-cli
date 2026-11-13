@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Pin OpenAPI 3.0.3 contract candidate 1.1.0 and its minimum compatible semantic server contract, with executable installed-command compatibility checks. Server publication and acceptance remain pending.
+- Add notification archive filters, reverse paging and explicit creation state. Send maps-only settings as the documented integer type.
+- Require HTTP 204 before confirming lead deletion and preserve uncertainty for unexpected success responses.
+- Accept additive email acknowledgement and event receipt fields while retaining required receipt validation.
+
 - Add explicitly consented account email requests and browser recipient-confirmation guidance.
 - Add fixed browser handoffs for settings, security, onboarding, preview, installation and lifetime billing, with unverified account and completion state.
 - Add an opt-in disposable test-account journey and capability reference.

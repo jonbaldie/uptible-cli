@@ -1,0 +1,7 @@
+{
+  "api_major": 1,
+  "minimum_server_contract": "1.1.0",
+  "snapshot": "v1.1.0.json",
+  "sha256": "69478e641f5fe22df2012abf3cec8db0089b8f083b228f26f99b093c1002868c",
+  "openapi": "3.0.3"
+}

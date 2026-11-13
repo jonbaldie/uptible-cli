@@ -8,7 +8,7 @@ The existing read retry policy remains one extra request for HTTP 429 or 503 wit
 
 ## Events and billing
 
-Event commands send the caller's notification ID, session ID, event ID and payload directly to the authenticated operations. The server owns receipt identity and processing. The client requires a processed receipt and never retries a write automatically. An uncertain outcome tells the customer to repeat the exact command.
+Event commands send the caller's notification ID, session ID, event ID and payload directly to the authenticated operations. The server owns receipt identity and processing. The client requires a processed receipt, accepts additive receipt fields and never retries a write automatically. An uncertain outcome tells the customer to repeat the exact command.
 
 Billing status is a read of one page for each of two independent lists. The client passes each opaque cursor through without interpreting it. The server owns eligibility and access decisions. This command performs no checkout operation.
 
@@ -47,7 +47,7 @@ Homebrew uses source resources from `scripts/homebrew-resources.json`. The rende
 
 ## Compatibility and dependency updates
 
-CLI and package versions use the same semantic version. Before 1.0, a minor release may change command names or JSON fields and must describe the change in the changelog. Patch releases preserve command meanings, exit codes, and existing JSON fields. New optional error fields are additive. Scripts must ignore unknown fields. The API remains experimental and there is no claim of complete OpenAPI parity or a published minimum server release.
+CLI and package versions use the same semantic version. Before 1.0, a minor release may change command names or JSON fields and must describe the change in the changelog. Patch releases preserve command meanings, exit codes, and existing JSON fields. New optional error fields are additive. Scripts must ignore unknown fields. The API consumer pins OpenAPI 3.0.3 contract candidate `1.1.0` at `/api/v1`. The [contract reference](docs/contracts/README.md) records its SHA-256, executable operation mapping and minimum compatible semantic server contract. Public publication and independent acceptance remain pending, so the pin is not a deployed compatibility claim. Consumer tests inspect actual installed command HTTP requests and additive responses. Normal commands do not negotiate or enforce a server version. The opt-in integration suite checks the advertised header before draft mutations.
 
 To update release dependencies, choose versions that support Python 3.11 through 3.14 and satisfy the package metadata. Read upstream wheel metadata for every transitive dependency and its markers. Replace the exact versions and SHA-256 wheel hashes in both requirement files using the corresponding PyPI version's JSON metadata. Keep all supported wheel variants. Update the formula source URLs and SHA-256 hashes from the same versions in `homebrew-resources.json`. Review upstream changes and scan dependency advisories. Do not copy `pip freeze` from one host. Commit the inputs, then run the verifier and all CI interpreter jobs. Rehearse the rendered formula on macOS and review the recorded dependency graph before approving an update.
 

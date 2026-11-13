@@ -19,12 +19,14 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 WHEEL_FILES = {'uptible_cli/__init__.py', 'uptible_cli/__main__.py', 'uptible_cli/completion.py'}
 DIST_INFO = re.compile(r'uptible_cli-[^/]+\.dist-info/(METADATA|WHEEL|entry_points.txt|top_level.txt|RECORD)')
-SOURCE_FILES = {'PKG-INFO', 'README.md', 'pyproject.toml', 'setup.cfg',
+SOURCE_FILES = {'PKG-INFO', 'README.md', 'DESIGN.md', 'CHANGELOG.md', 'docs/capabilities.md', 'pyproject.toml', 'setup.cfg',
                 'src/uptible_cli/__init__.py', 'src/uptible_cli/__main__.py', 'src/uptible_cli/completion.py',
                 'src/uptible_cli.egg-info/PKG-INFO', 'src/uptible_cli.egg-info/SOURCES.txt',
                 'src/uptible_cli.egg-info/dependency_links.txt', 'src/uptible_cli.egg-info/entry_points.txt',
                 'src/uptible_cli.egg-info/requires.txt', 'src/uptible_cli.egg-info/top_level.txt',
-                'tests/test_cli.py', 'tests/test_completion.py', 'tests/test_integration.py'}
+                'tests/test_cli.py', 'tests/test_completion.py', 'tests/test_integration.py', 'tests/test_contract.py',
+                'MANIFEST.in', 'docs/contracts/README.md', 'docs/contracts/manifest.json',
+                'docs/contracts/v1.1.0.json', 'docs/contracts/cli-operations.json'}
 
 
 def sha256(path):
@@ -78,7 +80,10 @@ def normalize_sdist(path, epoch):
         roots = {m.name.split('/')[0] for m in members}
         files = {m.name.split('/', 1)[1] for m in members if m.isfile() and '/' in m.name}
         if (len(roots) != 1 or not files <= SOURCE_FILES
-                or not {'pyproject.toml', 'src/uptible_cli/__init__.py'} <= files
+                or not {'pyproject.toml', 'src/uptible_cli/__init__.py', 'tests/test_contract.py',
+                        'DESIGN.md', 'CHANGELOG.md', 'docs/capabilities.md',
+                        'docs/contracts/manifest.json', 'docs/contracts/v1.1.0.json',
+                        'docs/contracts/cli-operations.json', 'docs/contracts/README.md'} <= files
                 or any('..' in Path(m.name).parts or m.name.startswith('/') for m in members)):
             raise ValueError(f'Unexpected source distribution contents: {sorted(files)}')
         contents = [(m.name, tar.extractfile(m).read() if m.isfile() else None) for m in members]
@@ -188,6 +193,35 @@ def completion_controls(python, source, tmp, dest, env):
     run(python, '-m', 'unittest', 'discover', '-s', source / 'tests', '-p', 'test_completion.py', '-v', cwd=tmp, env=env)
 
 
+def contract_controls(python, source, tmp, dest, env):
+    module = Path(subprocess.check_output([python, '-c',
+                  'import uptible_cli; print(uptible_cli.__file__)'], cwd=tmp, env=env, text=True).strip())
+    original = module.read_text()
+    mutations = {
+        'boolean-notification-wire-type': original.replace('int(payload["display_maps_only"])', 'bool(payload["display_maps_only"])'),
+        'closed-event-receipt': original.replace('not isinstance(result.get("receipt"), str)', 'set(result) != {"receipt", "status"} or not isinstance(result.get("receipt"), str)'),
+    }
+    try:
+        for name, mutated in mutations.items():
+            if mutated == original:
+                raise ValueError('Contract negative control did not change the installed module')
+            module.write_text(mutated)
+            for cached in module.parent.glob('__pycache__/__init__.*.pyc'):
+                cached.unlink()
+            result = subprocess.run([python, '-m', 'unittest', 'discover', '-s', source / 'tests',
+                                     '-p', 'test_contract.py', '-v'], cwd=tmp, env=env, text=True, capture_output=True)
+            (dest / (name + '.log')).write_text(result.stdout + result.stderr)
+            if result.returncode == 0 or 'FAILED' not in result.stderr:
+                raise ValueError(f'Contract negative control was not rejected: {name}')
+    finally:
+        module.write_text(original)
+        for cached in module.parent.glob('__pycache__/__init__.*.pyc'):
+            cached.unlink()
+    if module.read_text() != original:
+        raise ValueError('Contract negative control did not restore the installed module')
+    run(python, '-m', 'unittest', 'discover', '-s', source / 'tests', '-p', 'test_contract.py', '-v', cwd=tmp, env=env)
+
+
 def main():
     if len(sys.argv) != 2:
         sys.exit('Usage: python scripts/verify-artifact.py OUTPUT_DIRECTORY')
@@ -242,6 +276,7 @@ def main():
         run(cli, '--help', cwd=tmp, env=env)
         run(python, '-c', 'import importlib.metadata as m, uptible_cli; from pathlib import Path; import sys; assert m.version("uptible-cli") == sys.argv[1]; assert Path(uptible_cli.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()); assert any(e.name == "uptible" and e.value == "uptible_cli:main" for e in m.entry_points(group="console_scripts"))', version, cwd=tmp, env=env)
         run(python, '-m', 'unittest', 'discover', '-s', source / 'tests', '-v', cwd=tmp, env=env)
+        contract_controls(python, source, tmp, dest, env)
         completion_controls(python, source, tmp, dest, env)
         negative_controls(tmp, source, next(p for p in artifacts if p.suffix == '.whl'), dest, env)
         for path in artifacts:
@@ -251,10 +286,12 @@ def main():
                     'artifacts': hashes, 'build_dependencies': resolution,
                     'runtime_dependencies': installed_resolutions[0],
                     'module_sha256': sha256(source / 'src/uptible_cli/__init__.py'),
+                    'server_contract': json.loads((source / 'docs/contracts/manifest.json').read_text()),
                     'inputs': {name: sha256(source / 'scripts' / name) for name in
                                ('verification-requirements.txt', 'runtime-requirements.txt', 'homebrew-resources.json')},
                     'negative_controls': ['tampered dependency hash rejected', 'unexpected wheel member rejected',
-                                          'omitted completion command rejected', 'broken generated shell rejected']}
+                                          'omitted completion command rejected', 'broken generated shell rejected',
+                                          'boolean notification wire type rejected', 'closed event receipt rejected']}
 
         (dest / 'BUILD_MANIFEST.json').write_text(json.dumps(manifest, indent=2) + '\n')
         (dest / 'SHA256SUMS').write_text(''.join(f'{digest}  {name}\n' for name, digest in sorted(hashes.items())))

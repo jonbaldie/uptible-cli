@@ -29,7 +29,7 @@ DEFAULT_CLIENT_ID = "5af9087d-4c3a-4bb9-a144-3cbf5560771a"
 SERVER_ERRORS = {"invalid_request", "invalid_client", "invalid_grant", "unauthorized_client", "unsupported_grant_type", "invalid_scope", "access_denied", "temporarily_unavailable", "server_error"}
 
 PROBLEM_ERRORS = {"bad_request", "unauthenticated", "forbidden", "not_found", "method_not_allowed", "conflict", "validation_error", "rate_limited", "upstream_unavailable", "internal_error", "request_error"}
-VALIDATION_FIELDS = {"message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions", "revision", "email", "name", "session_id", "event_id", "limit", "after", "notification_id", "from", "until", "cursor", "claim_cursor"}
+VALIDATION_FIELDS = {"message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions", "revision", "email", "name", "session_id", "event_id", "limit", "after", "before", "archived", "state", "notification_id", "from", "until", "cursor", "claim_cursor"}
 
 class Failure(Exception):
     def __init__(self, code, message, exit_code=1, *, http_status=0, correlation_id=None, fields=(), server_code=None):
@@ -489,7 +489,7 @@ def run(args):
             try:
                 result = authenticated(issuer + "/api/v1/account/email-change", method="POST",
                                        payload={"email": args.email}, expected_status=202)
-                if result != {"status": "confirmation_required"}:
+                if not isinstance(result, dict) or result.get("status") != "confirmation_required":
                     raise Failure("unexpected_response", "Server returned an unexpected response.", 3)
             except Failure as exc:
                 if exc.code in ("network_error", "unexpected_response") or exc.http_status >= 500:
@@ -505,7 +505,7 @@ def run(args):
                 if args.name is not None:
                     payload["name"] = args.name
             result = authenticated(issuer + "/api/v1/notifications/" + str(args.id) + "/" + args.action, method="POST", payload=payload)
-            if not isinstance(result, dict) or set(result) != {"receipt", "status"} or not isinstance(result["receipt"], str) or not result["receipt"] or result["status"] != "processed":
+            if not isinstance(result, dict) or not isinstance(result.get("receipt"), str) or not result["receipt"] or result.get("status") != "processed":
                 raise Failure("event_uncertain", "The server returned an invalid receipt. Retry the exact command with the same IDs and payload.", 3)
             return result
         if args.command == "billing":
@@ -526,15 +526,17 @@ def run(args):
                 params.update({key: value for key, value in (("notification_id", args.notification_id), ("from", args.date_from), ("until", args.until), ("cursor", args.cursor)) if value is not None})
                 return authenticated(path + "?" + urllib.parse.urlencode(params))
             path += "/" + str(args.id)
-            return authenticated(path, method="DELETE") if args.action == "delete" else authenticated(path)
+            return authenticated(path, method="DELETE", expected_status=204) if args.action == "delete" else authenticated(path)
         path = issuer + "/api/v1/notifications"
         if args.action == "list":
             params = {"limit": args.limit}
-            if args.after is not None:
-                params["after"] = args.after
+            params.update({key: value for key, value in (("after", args.after), ("before", args.before), ("archived", args.archived)) if value is not None})
             return authenticated(path + "?" + urllib.parse.urlencode(params))
         if args.action == "create":
-            return authenticated(path, method="POST", payload=notification_payload(args), extra_headers={"Idempotency-Key": args.idempotency_key})
+            payload = notification_payload(args)
+            if args.state is not None:
+                payload["state"] = args.state
+            return authenticated(path, method="POST", payload=payload, extra_headers={"Idempotency-Key": args.idempotency_key})
         path += "/" + str(args.id)
         if args.action == "show":
             return authenticated(path)
@@ -584,7 +586,10 @@ def browser_option(parser):
 
 
 def notification_payload(args):
-    return {name: getattr(args, name) for name in ("message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions") if getattr(args, name) is not None}
+    payload = {name: getattr(args, name) for name in ("message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions") if getattr(args, name) is not None}
+    if "display_maps_only" in payload:
+        payload["display_maps_only"] = int(payload["display_maps_only"])
+    return payload
 
 def positive(value):
     number = int(value)
@@ -674,9 +679,13 @@ def build_parser():
     notifications = sub.add_parser("notifications", help="manage notifications").add_subparsers(dest="action", required=True)
     listing = notifications.add_parser("list")
     listing.add_argument("--limit", type=positive, default=20, choices=range(1, 101), metavar="1-100")
-    listing.add_argument("--after", type=positive)
+    page = listing.add_mutually_exclusive_group()
+    page.add_argument("--after", type=positive)
+    page.add_argument("--before", type=positive, help="read notifications before this ID")
+    listing.add_argument("--archived", choices=("include", "exclude", "only"), help="archive filter, defaults to include on the server")
     create = notifications.add_parser("create")
     create.add_argument("--idempotency-key", required=True, type=create_key, help="stable unique key to reuse if the outcome is uncertain")
+    create.add_argument("--state", choices=("draft", "active"), help="creation intent, defaults to draft on the server; active requires lifetime access")
     notification_fields(create)
     edit = notifications.add_parser("edit")
     edit.add_argument("id", type=positive)
