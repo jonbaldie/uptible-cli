@@ -46,7 +46,7 @@ class ActualAccount(unittest.TestCase):
                 self.assertEqual(login['account']['id'], expected, 'Unexpected test account')
                 self.assertEqual(command('account', 'show')['id'], expected)
                 key = 'integration-' + uuid.uuid4().hex
-                message = 'Synthetic integration draft ' + key
+                message = 'Synthetic draft ' + uuid.uuid4().hex
                 draft = command('notifications', 'create', '--idempotency-key', key, '--message', message)
                 created = draft['id']
                 self.assertIs(type(created), int)
