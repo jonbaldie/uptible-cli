@@ -83,7 +83,7 @@ Run `uptible notifications delete 123` and confirm the prompt. Use `--yes` to co
 
 ## Add permissions
 
-Use `uptible auth login --add` with one or more of `--events`, `--billing`, `--delete-leads`, and `--delete-notifications`. The browser asks you to approve the existing permissions and the additions. Sign in to the same account. Deleting leads or notifications requires your current password in the browser.
+Use `uptible auth login --add` with one or more of `--events`, `--billing`, `--delete-leads`, `--delete-notifications`, and `--email-change`. The browser asks you to approve the existing permissions and the additions. Sign in to the same account. Deleting leads or notifications and requesting email changes requires your current password in the browser.
 
 The CLI retains the existing connection if you decline or select a different account. It saves the approved connection before revoking the old grant. If it cannot confirm grant cleanup, check your account connections and revoke the unintended connection. If the CLI cannot determine the existing permissions, it stops without replacing the connection.
 
@@ -166,12 +166,15 @@ After upgrading the installed CLI, rerun the generation command for your shell a
 | Show installation details | `uptible installation show` |
 | Show notification activity | `uptible notifications activity` |
 | List, show, or permanently delete leads | `uptible leads list`, `uptible leads show`, `uptible leads delete` |
-| Preview a notification | Not implemented |
+| Preview a notification | `uptible notifications preview ID` opens the browser list for manual selection |
 | Submit capture or tracking events | `uptible events capture`, `uptible events track` |
 | Read lifetime billing | `uptible billing status` |
-| Modify an account, view broader statistics, or initiate checkout | Not implemented |
+| Request email update and confirm it | `uptible account update --email ADDRESS`, `uptible account confirm-email` |
+| Settings, security and onboarding | `uptible account settings`, `uptible account security`, `uptible account onboarding` |
+| Review lifetime checkout | `uptible billing checkout` opens the browser review page |
+| Arbitrary statistics windows and time zones | Not supported by the server |
 
-The connection routes are experimental and may change before a public API contract is published. Checkout and other account operations are not implemented. Full command coverage, server compatibility, distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
+The connection routes are experimental and may change before a public API contract is published. Browser actions have explicit continuity and completion limits in the [capability reference](docs/capabilities.md). Full contract coverage, server compatibility and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
 
 ## Development
 
@@ -206,3 +209,40 @@ brew audit --strict --formula local/uptible/uptible
 ```
 
 This local tap is a release rehearsal. No public Homebrew package is available yet. After the maintainer publishes and verifies the release and tap, the customer install command becomes `brew install jonbaldie/tap/uptible`. A later published version updates with `brew update` and `brew upgrade jonbaldie/tap/uptible`. Production publication, clean-machine installation from the public tap, and login against `https://uptible.com` remain unperformed Go actions in [issue #24](https://github.com/jonbaldie/uptible-cli/issues/24).
+
+## Update your email address
+
+Request the extra permission explicitly. The browser asks for your current password during consent. The CLI never collects a password or confirmation code.
+
+```sh
+uptible auth login --add --email-change
+uptible account update --email new-address@example.com
+uptible account confirm-email
+uptible account show
+```
+
+For a new connection, omit `--add`. The update command sends only the new address and reports `confirmation_required`. It does not report an identity change. Check the browser's signed-in account, then enter the emailed recipient code and current password in **Confirm email change** on the account page. Afterwards, `account show` reads the authoritative identity. The existing connection continues after confirmation.
+
+Invalid, expired, replaced or used codes do not change the address. If the request outcome is unknown, inspect the recipient mailbox and account page before requesting another code. The CLI never automatically repeats an email request.
+
+## Open browser actions
+
+Use `account settings`, `account security`, `account onboarding`, `installation open`, `notifications preview ID`, `billing checkout`, or `billing open`. The [capability reference](docs/capabilities.md) lists their routes and limits.
+
+These commands open a fixed page on your selected service. The browser has an independent session. Compare its identity with `account show` before you submit a form. Opening the page does not confirm that a setting changed, a preview rendered or a payment completed. Handoff JSON reports `completed: false` and `account_binding_verified: false` because the service has no account-bound return receipt.
+
+## Run the opt-in test account suite
+
+Provision an isolated service and a dedicated disposable test account first. Register the public client for loopback OAuth callbacks. Use the installed CLI's Python environment and set every target explicitly:
+
+```sh
+UPTIBLE_INTEGRATION=dedicated-test-account \
+UPTIBLE_TEST_ISSUER=https://test.example.com \
+UPTIBLE_TEST_CLIENT_ID=registered-public-client \
+UPTIBLE_TEST_ACCOUNT_ID=123 \
+python -m unittest discover -s tests -p test_integration.py -v
+```
+
+The suite uses fresh temporary credentials and real system-browser OAuth. Sign in to the dedicated account and approve notification deletion with current-password proof in the browser. The suite verifies the returned account ID before it creates one uniquely named synthetic draft. It reads, archives, restores and deletes only that draft, then revokes its own connection. Existing credentials and unrelated notifications are untouched. A failed cleanup requires attention before rerunning.
+
+For a test account with lifetime access, add `UPTIBLE_TEST_LIFETIME_ACCESS=yes` to check lead, statistics and installation reads. The suite does not submit events, change account identity, close an account, initiate checkout or contact a payment provider. Browser email confirmation and payment outcomes require separate acceptance runs. The suite rejects the default production issuer, requires an explicit test issuer and skips entirely without the opt-in value. Default tests use synthetic local HTTP and OAuth fixtures.

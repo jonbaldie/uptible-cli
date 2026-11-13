@@ -24,7 +24,7 @@ SOURCE_FILES = {'PKG-INFO', 'README.md', 'pyproject.toml', 'setup.cfg',
                 'src/uptible_cli.egg-info/PKG-INFO', 'src/uptible_cli.egg-info/SOURCES.txt',
                 'src/uptible_cli.egg-info/dependency_links.txt', 'src/uptible_cli.egg-info/entry_points.txt',
                 'src/uptible_cli.egg-info/requires.txt', 'src/uptible_cli.egg-info/top_level.txt',
-                'tests/test_cli.py', 'tests/test_completion.py'}
+                'tests/test_cli.py', 'tests/test_completion.py', 'tests/test_integration.py'}
 
 
 def sha256(path):
@@ -203,7 +203,7 @@ def main():
     dest.mkdir(parents=True, exist_ok=True)
     if any(dest.iterdir()):
         sys.exit('Output directory must be empty')
-    env = {key: value for key, value in os.environ.items() if not key.startswith(('PYTHON', 'PIP_'))}
+    env = {key: value for key, value in os.environ.items() if not key.startswith(('PYTHON', 'PIP_', 'UPTIBLE_TEST_', 'UPTIBLE_INTEGRATION'))}
     env.update(SOURCE_DATE_EPOCH=str(epoch), PYTHONHASHSEED='0', BROWSER='/bin/false', PIP_CONFIG_FILE=os.devnull)
     with tempfile.TemporaryDirectory(prefix='uptible-verify-') as temporary:
         tmp = Path(temporary)

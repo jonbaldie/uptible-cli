@@ -63,6 +63,8 @@ class Server(BaseHTTPRequestHandler):
     interrupt_started = None
     interrupt_release = None
     account_payload = None
+    email_response = {'status': 'confirmation_required'}
+    email_status = 202
     event_receipt = {'receipt': 'synthetic-receipt', 'status': 'processed'}
     statistics = {'hour_captures_count': 1, 'captures_count': 2, 'all_captures_count': 3, 'tracks_count': 4, 'as_of': '2026-01-02T00:00:00Z', 'hour_start': '2026-01-01T23:00:00Z', 'day_start': '2026-01-01T00:00:00Z'}
     def log_message(self, *args):
@@ -139,6 +141,15 @@ class Server(BaseHTTPRequestHandler):
         if self.damaged_response(raw):
             return
         raw = raw.decode()
+        if self.path == '/api/v1/account/email-change':
+            self.operations.append(('POST', self.path, json.loads(raw)))
+            if self.api_error:
+                self.respond(self.api_error[1], self.api_error[0])
+            elif self.jwt_mode and 'account:email:write' not in self.claims()['scopes']:
+                self.respond({'code': 'forbidden'}, 403)
+            else:
+                self.respond(self.email_response, self.email_status)
+            return
         if self.path.startswith('/api/v1/notifications/') and self.path.endswith(('/capture', '/track')):
             self.operations.append(('POST', self.path, json.loads(raw)))
             if self.api_error:
@@ -395,6 +406,8 @@ class CLI(unittest.TestCase):
         Server.issued_access = None
         Server.logout_bearers = []
         Server.account_payload = None
+        Server.email_response = {'status': 'confirmation_required'}
+        Server.email_status = 202
         Server.event_receipt = {'receipt': 'synthetic-receipt', 'status': 'processed'}
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -502,6 +515,100 @@ urllib.request.urlopen(url, timeout=5).read()
                 process.kill()
                 process.wait()
             os.close(master)
+    def test_email_change_is_explicit_and_upgrade_preserves_the_old_connection_on_failure(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        default = set(Server.authorization['scope'][0].split())
+        self.assertNotIn('account:email:write', default)
+        old = self.creds.read_bytes()
+        command = ['auth', 'login', '--add', '--email-change', '--browser-driver', str(self.driver)]
+        result, body = self.run_cli(*command, env=dict(os.environ, DENY='1'))
+        self.assertEqual(body['error']['code'], 'authorization_denied')
+        self.assertEqual(self.creds.read_bytes(), old)
+        Server.account_number = 43
+        self.assertEqual(self.run_cli(*command)[1]['error']['code'], 'account_mismatch')
+        self.assertEqual(self.creds.read_bytes(), old)
+        Server.account_number = 42
+        self.assertEqual(self.run_cli(*command)[0].returncode, 0)
+        self.assertEqual(set(Server.authorization['scope'][0].split()), default | {'account:email:write'})
+        self.assertEqual(self.run_cli('account', 'show')[1]['id'], 42)
+
+    def test_email_request_sends_only_email_and_never_claims_identity_changed(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--email-change', '--browser-driver', str(self.driver))[0].returncode, 0)
+        result, body = self.run_cli('account', 'update', '--email', 'new@example.test')
+        self.assertEqual(result.returncode, 0, body)
+        self.assertEqual(body['status'], 'confirmation_required')
+        self.assertFalse(body['email_changed'])
+        self.assertEqual(body['confirmation_url'], self.base[5] + '/billing')
+        self.assertEqual(Server.operations, [('POST', '/api/v1/account/email-change', {'email': 'new@example.test'})])
+        self.assertEqual(self.run_cli('account', 'show')[1]['email'], 'person@example.test')
+        for status, response in [(200, {'status': 'confirmation_required'}), (202, {'status': 'changed'}), (202, {})]:
+            Server.email_status, Server.email_response = status, response
+            result, body = self.run_cli('account', 'update', '--email', 'new@example.test')
+            self.assertEqual((result.returncode, body['error']['code']), (3, 'email_change_uncertain'))
+        self.assertEqual(len(Server.operations), 4)
+
+    def test_email_request_scope_validation_and_damaged_response_have_no_false_success(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        old = self.creds.read_bytes()
+        result, body = self.run_cli('account', 'update', '--email', 'new@example.test')
+        self.assertEqual((result.returncode, body['error']['http_status']), (3, 403))
+        self.assertEqual(self.creds.read_bytes(), old)
+        Server.api_error = (422, {'code': 'validation_error', 'errors': {'email': ['private-marker']}})
+        self.assertEqual(self.run_cli('account', 'update', '--email', 'bad')[1]['error']['fields'], ['email'])
+        Server.response_fault = ('POST', '/api/v1/account/email-change', 'truncated-202')
+        result, body = self.run_cli('account', 'update', '--email', 'new@example.test')
+        self.assertEqual(body['error']['code'], 'email_change_uncertain')
+        self.assertNotIn('new@example.test', result.stderr)
+        self.assertNotIn('Bearer', result.stderr)
+        self.assertEqual(len(Server.fault_requests), 1)
+
+    def test_email_unauthorized_write_refreshes_without_replay(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--email-change', '--browser-driver', str(self.driver))[0].returncode, 0)
+        Server.api_error = (401, {'code': 'unauthenticated'})
+        result, body = self.run_cli('account', 'update', '--email', 'new@example.test')
+        self.assertEqual((result.returncode, body['error']['code']), (3, 'operation_not_retried'))
+        self.assertIn('email request was not retried', body['error']['message'])
+        self.assertEqual(Server.refreshes, 1)
+        self.assertEqual(len(Server.operations), 1)
+
+    def test_browser_handoffs_use_fixed_issuer_paths_and_admit_independent_account(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        opened = self.path / 'opened-url'
+        self.driver.write_text('#!/usr/bin/env python3\nimport pathlib,sys\npathlib.Path(' + repr(str(opened)) + ').write_text(sys.argv[1])\n')
+        cases = [('account', 'settings', '/billing'), ('account', 'security', '/billing'),
+                 ('account', 'onboarding', '/onboarding'), ('account', 'confirm-email', '/billing'),
+                 ('billing', 'checkout', '/billing'), ('billing', 'open', '/billing'),
+                 ('installation', 'open', '/install'), ('notifications', 'preview', '/notifications')]
+        for command, action, path in cases:
+            args = [command, action] + (['7'] if command == 'notifications' else [])
+            result, body = self.run_cli(*args, '--browser-driver', str(self.driver))
+            self.assertEqual(result.returncode, 0, body)
+            self.assertFalse(body['completed'])
+            self.assertFalse(body['account_binding_verified'])
+            self.assertEqual(body['connected_account_id'], 42)
+            self.assertEqual(body['url'], self.base[5] + path)
+            deadline = time.monotonic() + 3
+            while (not opened.exists() or opened.read_text() != body['url']) and time.monotonic() < deadline:
+                time.sleep(.01)
+            self.assertEqual(opened.read_text(), body['url'])
+            self.assertNotIn('Bearer', body['url'])
+        result, body = self.run_cli('account', 'security', '--browser-driver', str(self.path / 'missing'))
+        self.assertEqual((result.returncode, body['error']['code']), (1, 'browser_failed'))
+
+    def test_browser_handoff_rejects_unsafe_issuer_before_any_browser_or_connection(self):
+        for issuer in ['http://example.test', 'https://name:secret@example.test', 'https://example.test/path',
+                       'https://example.test?token=private', 'https://example.test#fragment',
+                       'https://example.test:invalid', 'https://example.test:0', 'https://example.test\n', 'https://example.test\\evil']:
+            base = list(self.base)
+            base[base.index('--issuer') + 1] = issuer
+            result = subprocess.run(base + ['account', 'security'], capture_output=True, text=True)
+            self.assertEqual((result.returncode, json.loads(result.stderr)['error']['code']), (2, 'invalid_issuer'))
+        self.assertFalse(self.creds.exists())
+
     def test_notification_delete_permission_is_explicit_on_initial_login(self):
         Server.jwt_mode = True
         self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
@@ -664,7 +771,7 @@ urllib.request.urlopen(url, timeout=5).read()
         Server.jwt_mode = True
         self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
         original = self.creds.read_text()
-        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, add=True, delete_leads=False, delete_notifications=False, events=True, billing=False, browser_driver=str(self.driver))
+        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, add=True, delete_leads=False, delete_notifications=False, email_change=False, events=True, billing=False, browser_driver=str(self.driver))
         with patch.object(uptible_cli.Store, 'write', side_effect=OSError('disk failure')):
             with self.assertRaises(OSError):
                 uptible_cli.run(args)
@@ -697,7 +804,7 @@ urllib.request.urlopen(url, timeout=5).read()
         Server.jwt_mode = True
         self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
         original = self.creds.read_text()
-        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, add=True, delete_leads=False, delete_notifications=False, events=True, billing=False, browser_driver=str(self.driver))
+        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, add=True, delete_leads=False, delete_notifications=False, email_change=False, events=True, billing=False, browser_driver=str(self.driver))
         write = uptible_cli.Store.write
         def save_then_fail(store, value):
             write(store, value)
