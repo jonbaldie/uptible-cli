@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shlex
 import signal
 import subprocess
 import sys
@@ -403,6 +404,37 @@ urllib.request.urlopen(url, timeout=5).read()
     def run_cli(self, *args, env=None):
         result = subprocess.run(self.base + list(args), capture_output=True, text=True, env=env, timeout=10)
         return result, json.loads(result.stdout or result.stderr)
+    def use_named_connection(self):
+        self.creds = self.path / "saved 'credential' $HOME.json"
+        self.base[self.base.index('--credential-file') + 1] = str(self.creds)
+        self.base[self.base.index('--client-id') + 1] = "test 'client' $HOME"
+        self.base.extend(['--profile', "profile 'quoted' $HOME; false"])
+
+    def recovery_commands(self, message):
+        self.assertIn('Revoke', message)
+        lines = [line.strip() for line in message.splitlines() if line.strip().startswith('uptible ')]
+        self.assertEqual(len(lines), 2, message)
+        for line, action in zip(lines, (['auth', 'logout', '--local'], ['auth', 'login'])):
+            command = shlex.split(line)
+            self.assertEqual(command[-len(action):], action)
+            for option in ('--issuer', '--client-id', '--profile', '--credential-file'):
+                self.assertEqual(command[command.index(option) + 1], self.base[self.base.index(option) + 1])
+            self.assertIn('--json', command)
+        return lines
+
+    def follow_recovery(self, message):
+        logout, login = self.recovery_commands(message)
+        env = dict(os.environ, PATH=str(Path(sys.executable).parent) + os.pathsep + os.environ.get('PATH', ''))
+        result = subprocess.run(['/bin/sh', '-c', logout], capture_output=True, text=True, env=env, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {'connected': False, 'revoked': False})
+        self.assertFalse(self.creds.exists())
+        login += ' --browser-driver ' + shlex.quote(str(self.driver))
+        result = subprocess.run(['/bin/sh', '-c', login], capture_output=True, text=True, env=env, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['account']['id'], 42)
+        self.assertEqual(json.loads(self.creds.read_text())['account_id'], 42)
+
     def interrupt_cli(self, base, *args):
         Server.interrupt_started = threading.Event()
         Server.interrupt_release = threading.Event()
@@ -1213,6 +1245,76 @@ urllib.request.urlopen(url, timeout=5).read()
                     self.assertNotIn('synthetic-refresh-credential-marker', result.stdout + result.stderr)
                     if isinstance(access, str):
                         self.assertFalse(access in result.stdout + result.stderr, 'A credential reached the output')
+
+    def test_first_refresh_mismatch_message_recovers_the_selected_connection(self):
+        self.use_named_connection()
+        for trigger in ('expired', '401'):
+            with self.subTest(trigger=trigger):
+                self.creds.unlink(missing_ok=True)
+                Server.jwt_mode = True
+                Server.refresh_account = None
+                Server.current_refresh = 'first'
+                Server.refreshes = 0
+                Server.grant_number = 0
+                Server.reject_next = False
+                Server.calls = []
+                self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+                saved = json.loads(self.creds.read_text())
+                if trigger == 'expired':
+                    saved['expires_at'] = 0
+                self.creds.write_text(json.dumps(saved))
+                Server.refresh_account = 43
+                Server.reject_next = trigger == '401'
+                result, body = self.run_cli('account', 'show')
+                self.assertEqual((result.returncode, body['error']['code']), (3, 'refresh_account_changed'))
+                first_message = body['error']['message']
+                self.assertEqual(json.loads(self.creds.read_text()), dict(saved, refresh_pending=True))
+                first_commands = self.recovery_commands(first_message)
+                for command, code in ((('auth', 'login'), 'already_connected'),
+                                      (('auth', 'login', '--add'), 'refresh_uncertain'),
+                                      (('auth', 'login', '--add', '--delete-notifications'), 'refresh_uncertain')):
+                    retry, retry_body = self.run_cli(*command)
+                    self.assertEqual(retry_body['error']['code'], code)
+                    self.assertEqual(self.recovery_commands(retry_body['error']['message']), first_commands)
+                    if command == ('auth', 'login'):
+                        self.assertNotIn('Use auth login --add', retry_body['error']['message'])
+                self.assertEqual(Server.refreshes, 1)
+                self.follow_recovery(first_message)
+
+    def test_first_legacy_unknown_message_recovers_the_selected_connection(self):
+        self.use_named_connection()
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        saved = json.loads(self.creds.read_text())
+        saved.pop('account_id')
+        saved['expires_at'] = 0
+        self.creds.write_text(json.dumps(saved))
+        before = self.creds.read_bytes()
+        result, body = self.run_cli('account', 'show')
+        self.assertEqual((result.returncode, body['error']['code']), (3, 'account_unknown'))
+        first_message = body['error']['message']
+        first_commands = self.recovery_commands(first_message)
+        for command, code in ((('auth', 'login'), 'already_connected'),
+                              (('auth', 'login', '--add', '--events'), 'scope_unknown')):
+            retry, retry_body = self.run_cli(*command)
+            self.assertEqual(retry_body['error']['code'], code)
+            self.assertEqual(self.recovery_commands(retry_body['error']['message']), first_commands)
+        self.assertEqual(self.creds.read_bytes(), before)
+        self.assertEqual(Server.refreshes, 0)
+        self.follow_recovery(first_message)
+
+    def test_upgrade_refresh_permission_mismatch_reports_working_recovery(self):
+        self.use_named_connection()
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--events', '--browser-driver', str(self.driver))[0].returncode, 0)
+        saved = json.loads(self.creds.read_text())
+        saved['expires_at'] = 0
+        self.creds.write_text(json.dumps(saved))
+        Server.refresh_scopes = ['account:read']
+        result, body = self.run_cli('auth', 'login', '--add', '--delete-notifications', '--browser-driver', str(self.driver))
+        self.assertEqual((result.returncode, body['error']['code']), (3, 'refresh_permissions_changed'))
+        self.assertEqual(json.loads(self.creds.read_text()), dict(saved, refresh_pending=True))
+        Server.refresh_scopes = None
+        self.follow_recovery(body['error']['message'])
 
     def test_ordinary_refresh_rejects_another_account_before_delete_or_read(self):
         for storage in ('new', 'legacy-jwt'):
