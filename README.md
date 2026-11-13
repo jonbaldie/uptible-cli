@@ -79,7 +79,7 @@ Unlike archive, permanent deletion removes the notification and its collected le
 
 Ordinary login does not request deletion permission. For a new connection, run `uptible auth login --delete-notifications`. For an existing connection, run `uptible auth login --add --delete-notifications`. Approve the permission and enter your current password in the browser. The CLI does not ask for your password.
 
-Run `uptible notifications delete 123` and confirm the prompt. Use `--yes` to confirm without a prompt. A successful command returns `{"deleted": true, "id": 123}` after the server confirms deletion. The CLI never automatically repeats the delete request. A lost or damaged response, or an interruption while waiting for it, leaves the outcome unknown. Run `uptible notifications show 123` before deciding whether to retry. A missing or foreign notification returns HTTP 404.
+Run `uptible notifications delete 123` and confirm the prompt. Use `--yes` to confirm without a prompt. A successful command returns `{"deleted": true, "id": 123}` after the server confirms deletion. The CLI never automatically repeats the delete request. A lost or damaged response, or an interruption while waiting for it, leaves the outcome unknown. An unreadable or invalid nonempty error body is also treated as damaged, even when the status is 4xx. A complete empty error body or valid JSON error keeps its status handling. Run `uptible notifications show 123` before deciding whether to retry. A missing or foreign notification returns HTTP 404.
 
 ## Add permissions
 
@@ -107,9 +107,9 @@ For an alternate service, pass `--issuer` and its registered `--client-id` befor
 
 If login reports that a grant may have been created or that revocation could not be confirmed, inspect your account connections and revoke any unintended grant before retrying.
 
-If refresh fails or is interrupted, its outcome can be unknown. The CLI retains the old credential and refuses to replay it. The CLI does not save a refreshed credential if it belongs to another account or the account cannot be verified. During a permission upgrade, it also rejects changed permissions. The previous refresh credential may already be consumed. Revoke the connection on your account page, run `auth logout --local`, and log in again with the same issuer, client ID, and storage options.
+If refresh fails or is interrupted, its outcome can be unknown. The CLI retains the old credential and refuses to replay it. The CLI does not save a refreshed credential if it belongs to another account or the account cannot be verified. During a permission upgrade, it also rejects changed permissions. The previous refresh credential may already be consumed. Revoke the connection on your account page, run `auth logout --local`, and then run `auth login` with the same issuer, client ID, profile, and storage options.
 
-Older connections may not contain a recorded account ID. If their access token has no usable account subject, the CLI stops before refreshing. Reconnect to record the account ID.
+Older connections may not contain a recorded account ID. If their access token has no usable account subject, the CLI stops before refreshing. Revoke the connection, forget it locally, and log in again to record the account ID. For these identity failures and refresh account or permission mismatches, the error includes both commands with the selected options, quoted for a POSIX shell. Login requests the default permissions. Include any opt-in permission flags again if you need them.
 
 ## Output and help
 
