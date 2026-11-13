@@ -13,7 +13,7 @@ source .venv/bin/activate
 uptible --version
 ```
 
-This installs from the checkout. There is no published release or update channel yet. The CLI has been exercised on macOS only.
+This installs from the checkout. There is no published release or update channel yet. The automated tests have been exercised on macOS and Linux.
 
 ## Connect your account
 
@@ -27,7 +27,7 @@ uptible account show
 
 The CLI opens your browser for authorization and listens for the response on a temporary loopback port. Approve access in the browser. The command then displays your account. If your browser cannot open, set a default browser and retry. A browser and a loopback connection are required.
 
-When refresh is enabled on the server, the CLI refreshes an expired access credential automatically and saves the rotated refresh credential.
+When refresh is enabled on the server, the CLI refreshes an expired access credential automatically. It verifies the refreshed account before saving the rotated credential. The same check applies when a request triggers a refresh after HTTP 401.
 
 ## Browse and delete leads
 
@@ -79,7 +79,7 @@ Unlike archive, permanent deletion removes the notification and its collected le
 
 Ordinary login does not request deletion permission. For a new connection, run `uptible auth login --delete-notifications`. For an existing connection, run `uptible auth login --add --delete-notifications`. Approve the permission and enter your current password in the browser. The CLI does not ask for your password.
 
-Run `uptible notifications delete 123` and confirm the prompt. Use `--yes` to confirm without a prompt. A successful command returns `{"deleted": true, "id": 123}` after the server confirms deletion. The CLI never automatically repeats the delete request. If the outcome is unknown, run `uptible notifications show 123` before deciding whether to retry. A missing or foreign notification returns HTTP 404.
+Run `uptible notifications delete 123` and confirm the prompt. Use `--yes` to confirm without a prompt. A successful command returns `{"deleted": true, "id": 123}` after the server confirms deletion. The CLI never automatically repeats the delete request. A lost or damaged response leaves the outcome unknown. Run `uptible notifications show 123` before deciding whether to retry. A missing or foreign notification returns HTTP 404.
 
 ## Add permissions
 
@@ -101,13 +101,15 @@ To forget the local credential without revoking the server connection, use `auth
 
 The CLI uses an available supported operating-system keyring backend. To use a private file instead, add `--credential-file /path/to/private/credentials` before the command on every invocation. On Unix, the directory must be owned by you and inaccessible to other users. The CLI creates the file with mode `0600`. Keep it private.
 
-For an alternate service, pass `--issuer` and its registered `--client-id` before every command. The explicit flags override the built-in defaults; environment variables do not select a connection. Use `--profile NAME` before the command to select a separate keyring connection. For file storage, use a distinct file for each profile, issuer, and client ID. Do not copy a rotating refresh credential between machines. Simultaneous use can revoke the token family.
+For an alternate service, pass `--issuer` and its registered `--client-id` before every command. The service must return an integer account ID from its protected account endpoint. The explicit flags override the built-in defaults; environment variables do not select a connection. Use `--profile NAME` before the command to select a separate keyring connection. For file storage, use a distinct file for each profile, issuer, and client ID. Do not copy a rotating refresh credential between machines. Simultaneous use can revoke the token family.
 
 ## Recover a connection
 
 If login reports that a grant may have been created or that revocation could not be confirmed, inspect your account connections and revoke any unintended grant before retrying.
 
-If refresh fails or is interrupted, its outcome can be unknown. The CLI retains the old credential and refuses to replay it. If a refresh during a permission upgrade returns a different account or permissions, the CLI does not save the new credential. The previous refresh credential may already be consumed. Revoke the connection on your account page, run `auth logout --local`, and log in again with the same issuer, client ID, and storage options.
+If refresh fails or is interrupted, its outcome can be unknown. The CLI retains the old credential and refuses to replay it. The CLI does not save a refreshed credential if it belongs to another account or the account cannot be verified. During a permission upgrade, it also rejects changed permissions. The previous refresh credential may already be consumed. Revoke the connection on your account page, run `auth logout --local`, and log in again with the same issuer, client ID, and storage options.
+
+Older connections may not contain a recorded account ID. If their access token has no usable account subject, the CLI stops before refreshing. Reconnect to record the account ID.
 
 ## Output and help
 

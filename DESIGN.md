@@ -10,8 +10,14 @@ Billing status is a read of one page for each of two independent lists. The clie
 
 Login retains its existing default scopes. Event, billing, lead deletion, and notification deletion scopes are opt-in flags. An explicit `auth login --add` requests the union of the existing token scopes and the selected additions. The protected account endpoint validates each token and supplies the account ID. Under the credential lock, the client compares those IDs and requires the approved scope set to match the requested union. It saves the replacement and revokes the old family. Failed or uncertain cleanup is reported. The client cannot upgrade a connection when it cannot determine the existing scopes or account identity.
 
-If the old access credential has expired, the client reads its account ID from the token subject before refreshing. It compares that ID with the protected account response and compares the old and refreshed scopes before saving the refresh result. A mismatched or unverifiable refresh leaves the previous credential marked refresh-pending. Rotation may have consumed that credential, so recovery requires revocation and reconnection.
+## Account continuity on refresh
+
+The protected account endpoint supplies the account ID saved with a new or upgraded connection. Every refresh checks the refreshed token against that ID before saving it, including refreshes triggered by expiry or HTTP 401. A check only on deletion would miss an earlier refresh caused by a read. During a permission upgrade, the client also compares the old and refreshed scope sets.
+
+For an older credential without a recorded account ID, the client uses the positive decimal account subject in its access token. If neither is available, it stops before refreshing. A mismatched or unverifiable refresh leaves the previous credential marked refresh-pending. Rotation may have consumed that credential, so recovery requires revocation and reconnection. New opaque credentials can refresh when their protected account response supplies an integer ID.
 
 ## Notification deletion
 
-The client validates the notification ID and requires confirmation before it opens the credential store. The server owns account and scope checks. The client makes one `DELETE` request and reports deletion only after HTTP 204. Network failures, server errors, and unexpected success responses leave the outcome unknown. The customer can read the notification before deciding whether to retry.
+The client validates the notification ID and requires confirmation before it opens the credential store. The server owns account and scope checks. The client makes one `DELETE` request and reports deletion only after HTTP 204. Network failures, damaged HTTP responses, server errors, and unexpected success responses leave the outcome unknown. The customer can read the notification before deciding whether to retry.
+
+The shared request function handles HTTP protocol and JSON decoding failures both while opening a response and while reading an error body. It does not print raw response text or request credentials. Each command retains its existing recovery and retry policy.
