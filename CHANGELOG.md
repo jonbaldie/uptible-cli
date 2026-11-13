@@ -8,6 +8,7 @@
 
 ## Unreleased
 
+- Retain recognized API error codes, safe validation field names and request IDs, including through uncertain-write recovery errors.
 - Add explicitly authorized permanent notification deletion with confirmation and safe recovery for uncertain outcomes.
 - Report damaged or interrupted deletion responses, including unreadable 4xx bodies, as uncertain without exposing response text or credentials.
 - Report token-decoding failures safely and attempt to revoke an unusable new permission-upgrade grant.

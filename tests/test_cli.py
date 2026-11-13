@@ -50,6 +50,8 @@ class Server(BaseHTTPRequestHandler):
     reject_next = False
     drop_create = False
     api_error = None
+    api_headers = {}
+    rejections = []
     notification_records = None
     delete_success_status = 204
     response_fault = None
@@ -68,6 +70,10 @@ class Server(BaseHTTPRequestHandler):
         raw = json.dumps(value).encode()
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
+        if status >= 400:
+            self.rejections.append((self.command, self.path, status))
+            for name, value in self.api_headers.items():
+                self.send_header(name, value)
         self.end_headers()
         self.wfile.write(raw)
     def damaged_response(self, raw=b''):
@@ -374,6 +380,8 @@ class CLI(unittest.TestCase):
         Server.reject_next = False
         Server.drop_create = False
         Server.api_error = None
+        Server.api_headers = {}
+        Server.rejections = []
         Server.notification_records = None
         Server.delete_success_status = 204
         Server.response_fault = None
@@ -1561,6 +1569,118 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(body['error']['http_status'], 409)
         self.assertEqual(body['error']['correlation_id'], correlation)
         self.assertNotIn('synthetic-secret-marker', result.stderr)
+
+    def test_problem_statuses_in_human_and_json_output(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        correlation = '481e2370-b81f-4b8d-b02f-ad00f08c8444'
+        statuses = {400: 'bad_request', 401: 'unauthenticated', 403: 'forbidden', 404: 'not_found',
+                    405: 'method_not_allowed', 409: 'conflict', 422: 'validation_error', 429: 'rate_limited',
+                    500: 'internal_error', 502: 'upstream_unavailable', 503: 'upstream_unavailable',
+                    504: 'upstream_unavailable', 418: 'request_error'}
+        for status, code in statuses.items():
+            for structured in (False, True):
+                with self.subTest(status=status, structured=structured):
+                    Server.api_error = (status, {'code': code, 'status': 999, 'correlation_id': correlation,
+                                                'title': 'synthetic-secret-marker', 'detail': 'synthetic-secret-marker'})
+                    base = self.base if structured else [value for value in self.base if value != '--json']
+                    result = subprocess.run(base + ['stats', 'show'], capture_output=True, text=True, timeout=10)
+                    self.assertEqual((result.returncode, result.stdout), (3, ''))
+                    self.assertNotIn('synthetic-secret-marker', result.stderr)
+                    self.assertNotIn('999', result.stderr)
+                    if structured:
+                        error = json.loads(result.stderr)['error']
+                        self.assertEqual((error['code'], error['http_status'], error['correlation_id']), (code, status, correlation))
+                        self.assertEqual(set(error), {'code', 'message', 'http_status', 'correlation_id'})
+                    else:
+                        self.assertIn(f'HTTP {status}', result.stderr)
+                        self.assertIn('Request ID: ' + correlation, result.stderr)
+
+    def test_problem_context_is_allowlisted(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        fields = ['message', 'url_capture', 'url_display', 'display_maps_only', 'custom_delay_x_seconds',
+                  'display_last_x_conversions', 'revision', 'email', 'name', 'session_id', 'event_id',
+                  'limit', 'after', 'notification_id', 'from', 'until', 'cursor', 'claim_cursor']
+        errors = {field: ['synthetic-secret-marker'] for field in fields}
+        errors['synthetic-private-field'] = ['synthetic-secret-marker']
+        Server.api_error = (422, {'code': 'validation_error', 'errors': errors})
+        result, body = self.run_cli('stats', 'show')
+        self.assertEqual(body['error']['fields'], sorted(fields))
+        self.assertIn('Check these fields: ' + ', '.join(sorted(fields)), body['error']['message'])
+        self.assertNotIn('synthetic-', result.stderr)
+        for payload in (None, [], ['synthetic-secret-marker'], 'synthetic-secret-marker', 7,
+                        {'code': ['conflict'], 'error': {'secret': 'synthetic-secret-marker'}},
+                        {'code': 'synthetic-secret-marker', 'message': 'synthetic-secret-marker'},
+                        {'errors': ['synthetic-secret-marker']}, {'errors': {'synthetic-private-field': 'secret'}}):
+            with self.subTest(payload=payload):
+                Server.api_error = (422, payload)
+                result, body = self.run_cli('stats', 'show')
+                self.assertEqual((result.returncode, body['error']['code'], body['error']['http_status']), (3, 'http_error', 422))
+                self.assertNotIn('fields', body['error'])
+                self.assertNotIn('synthetic-', result.stderr)
+        Server.api_error = (409, {'code': 'conflict', 'errors': errors})
+        self.assertNotIn('fields', self.run_cli('stats', 'show')[1]['error'])
+
+    def test_problem_request_id_accepts_only_canonical_uuid(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        for correlation in (None, 42, {}, [], '', 'synthetic-secret-marker',
+                            '481e2370b81f4b8db02fad00f08c8444', '{481e2370-b81f-4b8d-b02f-ad00f08c8444}',
+                            '481e2370-b81f-4b8d-b02f-ad00f08c8444\nsynthetic-secret-marker'):
+            with self.subTest(correlation=correlation):
+                Server.api_error = (404, {'code': 'not_found', 'correlation_id': correlation})
+                result, body = self.run_cli('stats', 'show')
+                self.assertEqual(body['error']['code'], 'not_found')
+                self.assertNotIn('correlation_id', body['error'])
+                self.assertNotIn('synthetic-', result.stderr)
+        Server.api_error = (404, {'code': 'not_found', 'correlation_id': '481E2370-B81F-4B8D-B02F-AD00F08C8444'})
+        self.assertEqual(self.run_cli('stats', 'show')[1]['error']['correlation_id'], '481e2370-b81f-4b8d-b02f-ad00f08c8444')
+
+    def test_problem_oauth_compatibility_and_precedence(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        for code in ('invalid_request', 'invalid_client', 'invalid_grant', 'unauthorized_client',
+                     'unsupported_grant_type', 'invalid_scope', 'access_denied', 'temporarily_unavailable', 'server_error'):
+            with self.subTest(code=code):
+                Server.api_error = (400, {'error': code, 'error_description': 'synthetic-secret-marker'})
+                result, body = self.run_cli('stats', 'show')
+                self.assertEqual(body['error']['code'], code)
+                self.assertNotIn('synthetic-secret-marker', result.stderr)
+        for code, expected in (('conflict', 'conflict'), ('synthetic-secret-marker', 'invalid_request'), ([], 'invalid_request')):
+            Server.api_error = (409, {'code': code, 'error': 'invalid_request'})
+            result, body = self.run_cli('stats', 'show')
+            self.assertEqual(body['error']['code'], expected)
+            self.assertNotIn('synthetic-secret-marker', result.stderr)
+
+    def test_problem_context_survives_uncertain_write_without_replay(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--events', '--delete-notifications', '--browser-driver', str(self.driver))[0].returncode, 0)
+        correlation = '481e2370-b81f-4b8d-b02f-ad00f08c8444'
+        commands = [(('notifications', 'create', '--idempotency-key', 'key', '--message', 'Hello'), 'create_uncertain', 'POST', '/api/v1/notifications'),
+                    (('notifications', 'delete', '7', '--yes'), 'delete_uncertain', 'DELETE', '/api/v1/notifications/7'),
+                    (('events', 'track', '7', '--session-id', 'visit', '--event-id', 'view'), 'event_uncertain', 'POST', '/api/v1/notifications/7/track')]
+        for command, expected, method, path in commands:
+            for status, server_code in ((503, 'upstream_unavailable'), (401, 'unauthenticated')):
+                with self.subTest(command=command, status=status):
+                    Server.api_error = (status, {'code': server_code, 'correlation_id': correlation,
+                                                'detail': 'synthetic-secret-marker'})
+                    Server.api_headers = {'Retry-After': '0'}
+                    Server.rejections = []
+                    result, body = self.run_cli(*command)
+                    error = body['error']
+                    self.assertEqual((result.returncode, error['code']), (3, expected if status == 503 else 'operation_not_retried'))
+                    self.assertEqual((error['http_status'], error['server_code'], error['correlation_id']), (status, server_code, correlation))
+                    self.assertEqual(Server.rejections, [(method, path, status)])
+                    self.assertNotIn('synthetic-secret-marker', result.stderr)
+
+    def test_problem_retry_after_keeps_existing_get_contract(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        for status, code in ((429, 'rate_limited'), (503, 'upstream_unavailable')):
+            for header, count in ((None, 2), ('0', 2), ('2', 2), ('3', 1),
+                                  ('Wed, 21 Oct 2037 07:28:00 GMT', 1), ('later', 1), ('-1', 1), ('0.5', 1)):
+                with self.subTest(status=status, header=header):
+                    Server.api_error = (status, {'code': code})
+                    Server.api_headers = {} if header is None else {'Retry-After': header}
+                    Server.rejections = []
+                    result, body = self.run_cli('stats', 'show')
+                    self.assertEqual((result.returncode, body['error']['code']), (3, code))
+                    self.assertEqual(Server.rejections, [('GET', '/api/v1/statistics', status)] * count)
 
     def test_notification_error_boundaries(self):
         self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
