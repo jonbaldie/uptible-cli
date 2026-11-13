@@ -79,7 +79,7 @@ Unlike archive, permanent deletion removes the notification and its collected le
 
 Ordinary login does not request deletion permission. For a new connection, run `uptible auth login --delete-notifications`. For an existing connection, run `uptible auth login --add --delete-notifications`. Approve the permission and enter your current password in the browser. The CLI does not ask for your password.
 
-Run `uptible notifications delete 123` and confirm the prompt. Use `--yes` to confirm without a prompt. A successful command returns `{"deleted": true, "id": 123}` after the server confirms deletion. The CLI never automatically repeats the delete request. A lost or damaged response leaves the outcome unknown. Run `uptible notifications show 123` before deciding whether to retry. A missing or foreign notification returns HTTP 404.
+Run `uptible notifications delete 123` and confirm the prompt. Use `--yes` to confirm without a prompt. A successful command returns `{"deleted": true, "id": 123}` after the server confirms deletion. The CLI never automatically repeats the delete request. A lost or damaged response, or an interruption while waiting for it, leaves the outcome unknown. Run `uptible notifications show 123` before deciding whether to retry. A missing or foreign notification returns HTTP 404.
 
 ## Add permissions
 

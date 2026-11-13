@@ -20,4 +20,4 @@ For an older credential without a recorded account ID, the client uses the posit
 
 The client validates the notification ID and requires confirmation before it opens the credential store. The server owns account and scope checks. The client makes one `DELETE` request and reports deletion only after HTTP 204. Network failures, damaged HTTP responses, server errors, and unexpected success responses leave the outcome unknown. The customer can read the notification before deciding whether to retry.
 
-The shared request function handles HTTP protocol and JSON decoding failures both while opening a response and while reading an error body. It does not print raw response text or request credentials. Each command retains its existing recovery and retry policy.
+The shared request function preserves structured HTTP failures and converts other request exceptions and interrupts into safe network failures. It does not print raw response text or request credentials. An interrupted deletion has an unknown outcome and is not replayed. An interrupted refresh may have consumed its credential, so the pending marker prevents a retry.
