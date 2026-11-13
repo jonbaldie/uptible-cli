@@ -60,8 +60,11 @@ class ActualAccount(unittest.TestCase):
         from uptible_cli import issuer_url
 
         issuer = issuer_url(os.environ['UPTIBLE_TEST_ISSUER'])
+        hostname = urllib.parse.urlsplit(issuer).hostname
+        if '%' in hostname:
+            self.fail('Use a literal isolated test hostname')
         try:
-            hostname = urllib.parse.urlsplit(issuer).hostname.encode('idna').decode('ascii').rstrip('.').lower()
+            hostname = hostname.encode('idna').decode('ascii').rstrip('.').lower()
         except UnicodeError:
             self.fail('Use a valid isolated test hostname')
         if not hostname or hostname in ('uptible.com', 'www.uptible.com'):
