@@ -8,6 +8,8 @@
 
 ## Unreleased
 
+- Add local parser-derived Bash and Zsh completion with generation and installation instructions.
+
 - Require Python 3.11 or later and filelock 4.2.10 or later. Update advisory-affected build tools and Linux cryptography without changing credential locking.
 
 - Verify two byte-identical release builds from the committed source timestamp with hashed, platform-marked build and runtime inputs.

@@ -548,7 +548,7 @@ def notification_fields(parser):
     parser.add_argument("--custom-delay-x-seconds", type=int)
     parser.add_argument("--display-last-x-conversions", type=int)
 
-def main():
+def build_parser():
     p = argparse.ArgumentParser(prog="uptible", description="Connect to an Uptible account.")
     p.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     p.add_argument("--issuer", help="alternate HTTPS server origin (default: https://uptible.com; requires --client-id)")
@@ -617,7 +617,29 @@ def main():
     delete = notifications.add_parser("delete", help="permanently delete a notification and its collected leads", description="Permanently delete one notification and its collected leads. This cannot be undone. Request permission with auth login --delete-notifications or auth login --add --delete-notifications. If the outcome is unknown, check the notification before retrying.")
     delete.add_argument("id", type=positive)
     delete.add_argument("--yes", action="store_true", help="confirm permanent deletion without prompting")
+    completion = sub.add_parser("completion", help="generate local Bash or Zsh completion")
+    completion.add_argument("shell", choices=("bash", "zsh"), help="shell to generate; see README for installation")
+    return p
+
+
+def main():
+    from .completion import candidates, shell_script
+
+    p = build_parser()
+    if sys.argv[1:2] == ["--_complete"]:
+        try:
+            index = int(sys.argv[2])
+            words = sys.argv[3:]
+            if not 0 < index < len(words) or len(words) > 256 or sum(map(len, words)) > 32768:
+                return 2
+        except (IndexError, ValueError):
+            return 2
+        print("\n".join(candidates(p, words[1:index], words[index])), end="")
+        return 0
     args = p.parse_args()
+    if args.command == "completion":
+        print(shell_script(args.shell), end="")
+        return 0
     try:
         result = run(args)
         if args.json:
