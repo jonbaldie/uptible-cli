@@ -1318,6 +1318,28 @@ urllib.request.urlopen(url, timeout=5).read()
         Server.refresh_scopes = None
         self.follow_recovery(body['error']['message'])
 
+    def test_connected_login_recommends_add_when_upgrade_is_possible(self):
+        for legacy in (False, True):
+            with self.subTest(legacy=legacy):
+                self.creds.unlink(missing_ok=True)
+                Server.jwt_mode = True
+                Server.current_refresh = 'first'
+                Server.refreshes = 0
+                self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+                saved = json.loads(self.creds.read_text())
+                if legacy:
+                    saved.pop('account_id')
+                    saved['expires_at'] = 0
+                    self.creds.write_text(json.dumps(saved))
+                before = self.creds.read_bytes()
+                result, body = self.run_cli('auth', 'login')
+                self.assertEqual(body['error']['code'], 'already_connected')
+                self.assertIn('Use auth login --add', body['error']['message'])
+                self.assertEqual(self.creds.read_bytes(), before)
+                result, body = self.run_cli('auth', 'login', '--add', '--events', '--browser-driver', str(self.driver))
+                self.assertEqual((result.returncode, body['account']['id']), (0, 42))
+                self.assertEqual(Server.refreshes, int(legacy))
+
     def test_ordinary_refresh_rejects_another_account_before_delete_or_read(self):
         for storage in ('new', 'legacy-jwt'):
             for trigger in ('expired', '401'):
