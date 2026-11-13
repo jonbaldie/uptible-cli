@@ -359,13 +359,13 @@ def upgrade(args, issuer, store, original, recovery):
             raise Failure("login_uncertain", "A grant may have been created. Check account connections before retrying.", 3) from None
         try:
             request(issuer + "/api/v1/logout", form={}, bearer=access)
-        except Failure:
-            raise Failure("cleanup_unconfirmed", "The existing connection was retained, but revocation of the new grant could not be confirmed. Check account connections.", 3) from None
+        except Failure as cleanup:
+            raise cleanup.reframe("cleanup_unconfirmed", "The existing connection was retained, but revocation of the new grant could not be confirmed. Check account connections.") from None
         raise exc
     try:
         request(issuer + "/api/v1/logout", form={}, bearer=original["access_token"])
-    except Failure:
-        raise Failure("cleanup_unconfirmed", "The new connection was saved, but revocation of the old grant could not be confirmed. Check account connections.", 3) from None
+    except Failure as cleanup:
+        raise cleanup.reframe("cleanup_unconfirmed", "The new connection was saved, but revocation of the old grant could not be confirmed. Check account connections.") from None
     return {"connected": True, "account": new_account}
 
 def run(args):
@@ -428,8 +428,8 @@ def run(args):
                 if isinstance(access, str) and access:
                     try:
                         request(issuer + "/api/v1/logout", form={}, bearer=access)
-                    except Failure:
-                        raise Failure("cleanup_unconfirmed", "Login failed and grant revocation could not be confirmed. Revoke the connection in your account before retrying.", 3) from None
+                    except Failure as cleanup:
+                        raise cleanup.reframe("cleanup_unconfirmed", "Login failed and grant revocation could not be confirmed. Revoke the connection in your account before retrying.") from None
                 else:
                     raise Failure("login_uncertain", "A grant may have been created. Check your account connections and revoke any unintended connection before retrying.", 3) from None
                 raise exc
