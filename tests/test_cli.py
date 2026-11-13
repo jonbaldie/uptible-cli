@@ -77,6 +77,13 @@ class Server(BaseHTTPRequestHandler):
             self.wfile.flush()
             self.interrupt_started.set()
             self.interrupt_release.wait(10)
+        elif self.response_fault[2] == 'retry-503':
+            self.send_response(503, 'synthetic-untrusted-marker ' + echoed.decode())
+            self.send_header('Content-Length', '0')
+            self.send_header('Retry-After', '2')
+            self.end_headers()
+            self.wfile.flush()
+            self.interrupt_started.set()
         else:
             partial = b'{"error":"synthetic-untrusted-marker ' + echoed + b'"'
             self.send_response(503)
@@ -885,6 +892,19 @@ urllib.request.urlopen(url, timeout=5).read()
                     else:
                         self.assertTrue(stderr.startswith('Error: '))
         Server.response_fault = None
+
+    def test_interrupted_read_retry_never_exposes_the_bearer(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        access = json.loads(self.creds.read_text())['access_token']
+        Server.response_fault = ('GET', '/api/v1/account', 'retry-503')
+        code, stdout, stderr = self.interrupt_cli(self.base, 'account', 'show')
+        self.assertEqual(len(Server.fault_requests), 1)
+        self.assertTrue(access.encode() in Server.fault_requests[0][2])
+        self.assertFalse(access in stderr, 'The bearer credential reached error output')
+        self.assertFalse('synthetic-untrusted-marker' in stderr, 'Server text reached error output')
+        self.assertEqual((code, stdout), (3, ''))
+        self.assertEqual(json.loads(stderr)['error']['code'], 'network_error')
 
     def test_interrupted_login_never_exposes_the_authorization_verifier(self):
         Server.response_fault = ('POST', '/oauth/token', 'stalled-503')
