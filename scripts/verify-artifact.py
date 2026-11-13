@@ -63,7 +63,8 @@ def check_wheel(path):
     with zipfile.ZipFile(path) as wheel:
         names = wheel.namelist()
     files = set(names)
-    if (len(names) != len(files) or not WHEEL_FILES <= files
+    if (len(names) != 7 or len(files) != 7 or not WHEEL_FILES <= files
+            or len({name.split('/')[0] for name in files - WHEEL_FILES}) != 1
             or any(name not in WHEEL_FILES and not DIST_INFO.fullmatch(name) for name in files)):
         raise ValueError(f'Unexpected wheel contents: {sorted(files)}')
 
@@ -117,6 +118,9 @@ def build_once(tmp, revision, epoch, env, report_dir):
     for path in artifacts:
         if path.suffix == '.whl':
             check_wheel(path)
+            with zipfile.ZipFile(path) as wheel:
+                if any(wheel.read(name) != (source / 'src' / name).read_bytes() for name in WHEEL_FILES):
+                    raise ValueError('Wheel module differs from the committed source')
         else:
             normalize_sdist(path, epoch)
     (report_dir / 'artifacts.json').write_text(json.dumps({p.name: sha256(p) for p in artifacts}, indent=2) + '\n')
@@ -157,8 +161,8 @@ def negative_controls(tmp, source, wheel, dest, env):
 def main():
     if len(sys.argv) != 2:
         sys.exit('Usage: python scripts/verify-artifact.py OUTPUT_DIRECTORY')
-    if sys.implementation.name != 'cpython' or sys.platform not in {'darwin', 'linux'} or not (3, 10) <= sys.version_info[:2] <= (3, 14):
-        sys.exit('Release verification supports CPython 3.10 through 3.14 on macOS and Linux')
+    if sys.implementation.name != 'cpython' or sys.platform not in {'darwin', 'linux'} or not (3, 11) <= sys.version_info[:2] <= (3, 14):
+        sys.exit('Release verification supports CPython 3.11 through 3.14 on macOS and Linux')
     if output('git', 'status', '--porcelain', '--untracked-files=all'):
         sys.exit('Commit or remove all checkout changes before verification')
     revision = output('git', 'rev-parse', 'HEAD')

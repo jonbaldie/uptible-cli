@@ -8,6 +8,8 @@
 
 ## Unreleased
 
+- Require Python 3.11 or later and filelock 4.2.10 or later. Update advisory-affected build tools and Linux cryptography without changing credential locking.
+
 - Verify two byte-identical release builds from the committed source timestamp with hashed, platform-marked build and runtime inputs.
 - Reject tampered dependency inputs and unexpected wheel contents before release.
 - Authenticate Homebrew source archives against the build manifest and test installed module and dependency identity.

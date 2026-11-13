@@ -4,7 +4,7 @@ Use `uptible` to connect an Uptible account from your terminal, check the connec
 
 ## Install
 
-You need Python 3.10 or later and pip. From a checkout of this repository, create a virtual environment and install the CLI:
+You need Python 3.11 or later and pip. From a checkout of this repository, create a virtual environment and install the CLI:
 
 ```sh
 python3 -m venv .venv
@@ -153,7 +153,7 @@ To build and verify the committed checkout as installable distributions, run:
 python3 scripts/verify-artifact.py /tmp/uptible-verified
 ```
 
-The output directory must be empty and the checkout clean. The command builds twice from the commit in independent environments with hashed build and runtime inputs from PyPI. It compares artifact hashes and selected dependency hashes, checks package file lists, installs the wheel, and runs all synthetic tests outside the checkout. It also requires altered dependency bytes and an unexpected wheel member to fail verification. The artifacts include `BUILD_MANIFEST.json`, `SOURCE_REVISION`, `SHA256SUMS`, dependency reports, and negative-control logs. See [the release design](DESIGN.md#release-inputs-and-reproducibility) for the exact reproducibility claim and supported matrix. CI runs Python 3.10 through 3.14 on Linux. These checks do not establish operating-system keyring support or deployed-service compatibility. Remaining command coverage stays in issue #1.
+The output directory must be empty and the checkout clean. The command builds twice from the commit in independent environments with hashed build and runtime inputs from PyPI. It compares artifact hashes and selected dependency hashes, checks package file lists, installs the wheel, and runs all synthetic tests outside the checkout. It also requires altered dependency bytes and an unexpected wheel member to fail verification. The artifacts include `BUILD_MANIFEST.json`, `SOURCE_REVISION`, `SHA256SUMS`, dependency reports, and negative-control logs. See [the release design](DESIGN.md#release-inputs-and-reproducibility) for the exact reproducibility claim and supported matrix. CI runs Python 3.11 through 3.14 on Linux. These checks do not establish operating-system keyring support or deployed-service compatibility. Remaining command coverage stays in issue #1.
 
 ## Release
 

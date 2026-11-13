@@ -8,9 +8,9 @@
   },
   {
     "name": "filelock",
-    "version": "3.32.7",
-    "url": "https://files.pythonhosted.org/packages/0f/59/e19834834cb01a32febfbb0f8a23a9088088f5d45991824ff2bc3b5e8acb/filelock-3.32.7.tar.gz",
-    "sha256": "37b8a3d9811b0f9aef7e5ec5c71bb320de52df51e6ca9bcd6f5ad81187660da7",
+    "version": "4.2.10",
+    "url": "https://files.pythonhosted.org/packages/a1/cf/05bcdacabdc0aec7dc8e19d76281bd82325df62dae3b6430e9ba57397689/filelock-4.2.10.tar.gz",
+    "sha256": "fcc3c0cb8bfe7f4b3bb0e231c04b15dbad068cb3c2515f343d8fde4dce93bd5d",
     "platform": "all"
   },
   {
@@ -36,9 +36,9 @@
   },
   {
     "name": "more-itertools",
-    "version": "10.8.0",
-    "url": "https://files.pythonhosted.org/packages/ea/5d/38b681d3fce7a266dd9ab73c66959406d565b3e85f21d5e66e1181d93721/more_itertools-10.8.0.tar.gz",
-    "sha256": "f638ddf8a1a0d134181275fb5d58b086ead7c6a72429ad725c67503f13ba30bd",
+    "version": "11.2.1",
+    "url": "https://files.pythonhosted.org/packages/52/b8/c63995bebbb9ac9c059350e0fb8c82c2420c85aeca7d34e40aecf3df9281/more_itertools-11.2.1.tar.gz",
+    "sha256": "cbf08fd0af284dc69718b9b76a8e6203df624d70209ea511e4219d350c856f63",
     "platform": "all"
   },
   {

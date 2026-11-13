@@ -1,12 +1,12 @@
 [build-system]
-requires = ["setuptools==80.9.0"]
+requires = ["setuptools==84.2.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "uptible-cli"
 version = "0.1.0"
-requires-python = ">=3.10"
-dependencies = ["keyring>=25,<26", "filelock>=3.16,<4"]
+requires-python = ">=3.11"
+dependencies = ["keyring>=25,<26", "filelock>=4.2.10,<5"]
 
 [project.scripts]
 uptible = "uptible_cli:main"
