@@ -3,7 +3,6 @@ import argparse
 import base64
 import hashlib
 import hmac
-import http.client
 import json
 import os
 from pathlib import Path
@@ -57,6 +56,8 @@ def request(url, form=None, bearer=None, method=None, _retry=True, payload=None,
                     raise Failure("unexpected_response", "Server returned an unexpected response.", 3)
                 return json.load(response) if response.status != 204 else None
         except urllib.error.HTTPError as exc:
+            body = exc.read()
+            payload = json.loads(body) if body else None
             if _retry and form is None and method is None and exc.code in (429, 503):
                 retry_after = exc.headers.get("Retry-After", "0")
                 if retry_after.isdigit() and int(retry_after) <= 2:
@@ -64,15 +65,11 @@ def request(url, form=None, bearer=None, method=None, _retry=True, payload=None,
                     return request(url, bearer=bearer, _retry=False)
             code = "http_error"
             fields = []
-            try:
-                payload = json.load(exc)
-                if isinstance(payload, dict) and isinstance(payload.get("error"), str) and payload["error"] in SERVER_ERRORS:
-                    code = payload["error"]
-                if exc.code == 422 and isinstance(payload, dict) and isinstance(payload.get("errors"), dict):
-                    allowed = {"message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions", "revision"}
-                    fields = sorted(allowed.intersection(payload["errors"]))
-            except (ValueError, OSError, http.client.HTTPException, RecursionError):
-                pass
+            if isinstance(payload, dict) and isinstance(payload.get("error"), str) and payload["error"] in SERVER_ERRORS:
+                code = payload["error"]
+            if exc.code == 422 and isinstance(payload, dict) and isinstance(payload.get("errors"), dict):
+                allowed = {"message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions", "revision"}
+                fields = sorted(allowed.intersection(payload["errors"]))
             message = f"Server rejected request (HTTP {exc.code})."
             if fields:
                 message += " Check these fields: " + ", ".join(fields) + "."
