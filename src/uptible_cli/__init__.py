@@ -526,7 +526,7 @@ def run(args):
                 params.update({key: value for key, value in (("notification_id", args.notification_id), ("from", args.date_from), ("until", args.until), ("cursor", args.cursor)) if value is not None})
                 return authenticated(path + "?" + urllib.parse.urlencode(params))
             path += "/" + str(args.id)
-            return authenticated(path, method="DELETE") if args.action == "delete" else authenticated(path)
+            return authenticated(path, method="DELETE", expected_status=204) if args.action == "delete" else authenticated(path)
         path = issuer + "/api/v1/notifications"
         if args.action == "list":
             params = {"limit": args.limit}

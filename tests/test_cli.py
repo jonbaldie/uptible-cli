@@ -300,6 +300,8 @@ class Server(BaseHTTPRequestHandler):
             self.connection.close()
         elif self.api_error:
             self.respond(self.api_error[1], self.api_error[0])
+        elif self.delete_success_status != 204:
+            self.respond({'status': 'accepted'}, self.delete_success_status)
         else:
             self.send_response(204)
             self.end_headers()
@@ -874,6 +876,13 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(body['error']['code'], 'delete_uncertain')
         self.assertEqual(Server.operations.count(('DELETE', '/api/v1/leads/7')), 2)
         Server.drop_create = False
+        for status in (200, 202):
+            Server.delete_success_status = status
+            before = len(Server.operations)
+            result, body = self.run_cli('leads', 'delete', '7', '--yes')
+            self.assertEqual((result.returncode, body['error']['code']), (3, 'delete_uncertain'))
+            self.assertEqual(len(Server.operations) - before, 1)
+        Server.delete_success_status = 204
         for status in (403, 404, 422, 429):
             Server.api_error = (status, {'errors': {'secret': ['secret marker']}})
             result, body = self.run_cli('leads', 'delete', '7', '--yes')
