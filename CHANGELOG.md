@@ -8,6 +8,13 @@
 
 ## Unreleased
 
+- Require Python 3.11 or later and filelock 4.2.10 or later. Update advisory-affected build tools and Linux cryptography without changing credential locking.
+
+- Verify two byte-identical release builds from the committed source timestamp with hashed, platform-marked build and runtime inputs.
+- Reject tampered dependency inputs and unexpected wheel contents before release.
+- Authenticate Homebrew source archives against the build manifest and test installed module and dependency identity.
+- Document the supported release matrix, dependency updates, and unperformed public publication and production sign-in steps.
+
 - Retain recognized API error codes, safe validation field names and request IDs, including through uncertain-write recovery errors.
 - Add explicitly authorized permanent notification deletion with confirmation and safe recovery for uncertain outcomes.
 - Report damaged or interrupted deletion responses, including unreadable 4xx bodies, as uncertain without exposing response text or credentials.

@@ -98,4 +98,4 @@ jobs:
           cd "$RUNNER_TEMP/dist"
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "uptible $VERSION" --generate-notes \
-            ./*.whl ./*.tar.gz SHA256SUMS SOURCE_REVISION uptible.rb
+            ./*.whl ./*.tar.gz SHA256SUMS SOURCE_REVISION BUILD_MANIFEST.json uptible.rb
