@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
@@ -37,6 +38,8 @@ class Server(BaseHTTPRequestHandler):
     delete_success_status = 204
     response_fault = None
     fault_requests = []
+    interrupt_started = None
+    interrupt_release = None
     account_payload = None
     event_receipt = {'receipt': 'synthetic-receipt', 'status': 'processed'}
     statistics = {'hour_captures_count': 1, 'captures_count': 2, 'all_captures_count': 3, 'tracks_count': 4, 'as_of': '2026-01-02T00:00:00Z', 'hour_start': '2026-01-01T23:00:00Z', 'day_start': '2026-01-01T00:00:00Z'}
@@ -64,6 +67,16 @@ class Server(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             self.wfile.flush()
+        elif self.response_fault[2] == 'stalled-503':
+            self.send_response(503, 'synthetic-untrusted-marker ' + echoed.decode())
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', '100')
+            self.send_header('Retry-After', '3')
+            self.end_headers()
+            self.wfile.write(b'{"error":')
+            self.wfile.flush()
+            self.interrupt_started.set()
+            self.interrupt_release.wait(10)
         else:
             partial = b'{"error":"synthetic-untrusted-marker ' + echoed + b'"'
             self.send_response(503)
@@ -340,6 +353,21 @@ urllib.request.urlopen(url, timeout=5).read()
     def run_cli(self, *args, env=None):
         result = subprocess.run(self.base + list(args), capture_output=True, text=True, env=env, timeout=10)
         return result, json.loads(result.stdout or result.stderr)
+    def interrupt_cli(self, base, *args):
+        Server.interrupt_started = threading.Event()
+        Server.interrupt_release = threading.Event()
+        process = subprocess.Popen(base + list(args), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            self.assertTrue(Server.interrupt_started.wait(5), 'The server did not start its response')
+            time.sleep(0.3)
+            process.send_signal(signal.SIGINT)
+            stdout, stderr = process.communicate(timeout=8)
+            return process.returncode, stdout, stderr
+        finally:
+            Server.interrupt_release.set()
+            if process.poll() is None:
+                process.kill()
+                process.wait()
     def run_tty_cli(self, base, answer, *args):
         import pty
         import select
@@ -809,6 +837,96 @@ urllib.request.urlopen(url, timeout=5).read()
                         else:
                             self.assertTrue(result.stderr.startswith('Error: '))
         Server.response_fault = None
+
+    def test_interrupted_delete_is_uncertain_without_replay_or_credential_output(self):
+        Server.jwt_mode = True
+        Server.notification_records = {7: {'owner': 42}}
+        self.assertEqual(self.run_cli('auth', 'login', '--delete-notifications', '--browser-driver', str(self.driver))[0].returncode, 0)
+        access = json.loads(self.creds.read_text())['access_token']
+        Server.response_fault = ('DELETE', '/api/v1/notifications/7', 'stalled-503')
+        code, stdout, stderr = self.interrupt_cli(self.base, 'notifications', 'delete', '7', '--yes')
+        Server.response_fault = None
+        shown, body = self.run_cli('notifications', 'show', '7')
+        self.assertEqual(Server.operations.count(('DELETE', '/api/v1/notifications/7')), 1)
+        self.assertEqual(shown.returncode, 3)
+        self.assertIn('404', body['error']['message'])
+        self.assertTrue(access.encode() in Server.fault_requests[-1][2])
+        self.assertFalse(access in stderr, 'The bearer credential reached error output')
+        self.assertFalse('synthetic-untrusted-marker' in stderr, 'Server text reached error output')
+        self.assertEqual((code, stdout), (3, ''))
+        self.assertEqual(json.loads(stderr)['error']['code'], 'delete_uncertain')
+
+    def test_interrupted_requests_never_expose_bearers_or_request_bodies(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--events', '--delete-leads', '--browser-driver', str(self.driver))[0].returncode, 0)
+        access = json.loads(self.creds.read_text())['access_token']
+        cases = (
+            ('GET', '/api/v1/account', ('account', 'show'), 'network_error'),
+            ('POST', '/api/v1/notifications', ('notifications', 'create', '--idempotency-key', 'key', '--message', 'synthetic-request-body-marker'), 'create_uncertain'),
+            ('POST', '/api/v1/notifications/7/track', ('events', 'track', '7', '--session-id', 'synthetic-session-marker', '--event-id', 'event'), 'event_uncertain'),
+            ('PUT', '/api/v1/notifications/7', ('notifications', 'edit', '7', '--revision', '2', '--message', 'synthetic-request-body-marker'), 'network_error'),
+            ('DELETE', '/api/v1/leads/7', ('leads', 'delete', '7', '--yes'), 'delete_uncertain'),
+            ('POST', '/api/v1/logout', ('auth', 'logout'), 'network_error'),
+        )
+        for method, path, command, expected in cases:
+            for json_mode in (True, False):
+                with self.subTest(method=method, path=path, json_mode=json_mode):
+                    Server.fault_requests = []
+                    Server.response_fault = (method, path, 'stalled-503')
+                    base = self.base if json_mode else [value for value in self.base if value != '--json']
+                    code, stdout, stderr = self.interrupt_cli(base, *command)
+                    self.assertTrue(access.encode() in Server.fault_requests[-1][2])
+                    self.assertFalse(access in stdout or access in stderr, 'The bearer credential reached output')
+                    for marker in ('synthetic-untrusted-marker', 'synthetic-request-body-marker', 'synthetic-session-marker'):
+                        self.assertFalse(marker in stdout or marker in stderr, 'Untrusted text reached output')
+                    self.assertEqual((code, stdout), (3, ''))
+                    if json_mode:
+                        self.assertEqual(json.loads(stderr)['error']['code'], expected)
+                    else:
+                        self.assertTrue(stderr.startswith('Error: '))
+        Server.response_fault = None
+
+    def test_interrupted_login_never_exposes_the_authorization_verifier(self):
+        Server.response_fault = ('POST', '/oauth/token', 'stalled-503')
+        code, stdout, stderr = self.interrupt_cli(self.base, 'auth', 'login', '--browser-driver', str(self.driver))
+        form = urllib.parse.parse_qs(Server.fault_requests[-1][2].decode().strip())
+        verifier = form['code_verifier'][0]
+        self.assertTrue(verifier)
+        self.assertFalse(verifier in stdout or verifier in stderr, 'The authorization verifier reached output')
+        self.assertFalse('synthetic-untrusted-marker' in stderr, 'Server text reached error output')
+        self.assertEqual((code, stdout), (3, ''))
+        self.assertEqual(json.loads(stderr)['error']['code'], 'login_uncertain')
+        self.assertFalse(self.creds.exists())
+
+    def test_interrupted_refresh_preserves_the_old_credential(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        saved = json.loads(self.creds.read_text())
+        saved['refresh_token'] = 'synthetic-refresh-secret-marker'
+        saved['expires_at'] = 0
+        self.creds.write_text(json.dumps(saved))
+        Server.current_refresh = saved['refresh_token']
+        Server.response_fault = ('POST', '/oauth/token', 'stalled-503')
+        code, stdout, stderr = self.interrupt_cli(self.base, 'account', 'show')
+        self.assertTrue(saved['refresh_token'].encode() in Server.fault_requests[-1][2])
+        self.assertFalse(saved['refresh_token'] in stderr, 'The refresh credential reached error output')
+        self.assertFalse('synthetic-untrusted-marker' in stderr, 'Server text reached error output')
+        self.assertEqual((code, stdout), (3, ''))
+        self.assertEqual(json.loads(stderr)['error']['code'], 'network_error')
+        self.assertEqual(json.loads(self.creds.read_text()), dict(saved, refresh_pending=True))
+
+    def test_interrupted_login_cleanup_never_exposes_the_bearer(self):
+        Server.jwt_mode = True
+        Server.account_error = 'synthetic-account-error'
+        Server.response_fault = ('POST', '/api/v1/logout', 'stalled-503')
+        code, stdout, stderr = self.interrupt_cli(self.base, 'auth', 'login', '--browser-driver', str(self.driver))
+        access = Server.fault_requests[-1][2].decode().removeprefix('Bearer ').strip()
+        self.assertTrue(access)
+        self.assertFalse(access in stderr, 'The cleanup bearer credential reached error output')
+        self.assertFalse('synthetic-untrusted-marker' in stderr, 'Server text reached error output')
+        self.assertEqual((code, stdout), (3, ''))
+        self.assertEqual(json.loads(stderr)['error']['code'], 'cleanup_unconfirmed')
+        self.assertFalse(self.creds.exists())
 
     def test_deep_success_response_is_valid_or_a_safe_network_error(self):
         Server.jwt_mode = True
