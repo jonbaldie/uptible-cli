@@ -84,9 +84,23 @@ class Server(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.flush()
             self.interrupt_started.set()
+        elif self.response_fault[2] in ('invalid-422', 'malformed-422', 'empty-422'):
+            if self.response_fault[2] == 'invalid-422':
+                body = b'\xff synthetic-untrusted-marker ' + echoed
+            elif self.response_fault[2] == 'malformed-422':
+                body = b'{"error":"synthetic-untrusted-marker ' + echoed + b'"'
+            else:
+                body = b''
+            self.send_response(422)
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            self.wfile.flush()
         else:
             partial = b'{"error":"synthetic-untrusted-marker ' + echoed + b'"'
-            self.send_response(503)
+            kind = self.response_fault[2]
+            status = int(kind.removeprefix('truncated-')) if kind.startswith('truncated-') else 503
+            self.send_response(status)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(partial) + 100))
             self.end_headers()
@@ -811,6 +825,40 @@ urllib.request.urlopen(url, timeout=5).read()
                 self.assertEqual(result.stdout, '')
                 self.assertEqual(json.loads(result.stderr)['error']['code'], 'delete_uncertain')
 
+    def test_notification_delete_damaged_client_errors_are_uncertain_without_refresh(self):
+        faults = [(status, 'truncated-' + str(status)) for status in (400, 403, 404, 408, 409, 422, 429)]
+        faults += [(422, 'invalid-422'), (422, 'malformed-422'), (401, 'truncated-401')]
+        Server.jwt_mode = True
+        Server.notification_records = {identifier: {'owner': 42} for identifier in range(100, 100 + len(faults))}
+        self.assertEqual(self.run_cli('auth', 'login', '--delete-notifications', '--browser-driver', str(self.driver))[0].returncode, 0)
+        saved = self.creds.read_bytes()
+        access = json.loads(saved)['access_token']
+        for identifier, (status, kind) in enumerate(faults, start=100):
+            with self.subTest(status=status, kind=kind):
+                path = '/api/v1/notifications/' + str(identifier)
+                Server.response_fault = ('DELETE', path, kind)
+                result = subprocess.run(self.base + ['notifications', 'delete', str(identifier), '--yes'], capture_output=True, text=True, timeout=10)
+                Server.response_fault = None
+                shown, body = self.run_cli('notifications', 'show', str(identifier))
+                self.assertEqual(Server.operations.count(('DELETE', path)), 1)
+                self.assertEqual(shown.returncode, 3)
+                self.assertIn('404', body['error']['message'])
+                self.assertNotIn(access, result.stdout + result.stderr)
+                self.assertNotIn('synthetic-untrusted-marker', result.stdout + result.stderr)
+                self.assertNotIn('Traceback', result.stderr)
+                self.assertEqual(result.returncode, 3)
+                self.assertEqual(result.stdout, '')
+                self.assertEqual(json.loads(result.stderr)['error']['code'], 'delete_uncertain')
+                self.assertEqual(Server.refreshes, 0)
+                self.assertEqual(self.creds.read_bytes(), saved)
+
+    def test_complete_empty_client_error_remains_an_http_error(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        Server.response_fault = ('POST', '/api/v1/notifications', 'empty-422')
+        result, body = self.run_cli('notifications', 'create', '--idempotency-key', 'empty-error', '--message', 'safe')
+        self.assertEqual((result.returncode, body['error']['code']), (3, 'http_error'))
+        self.assertIn('422', body['error']['message'])
+
     def test_request_faults_never_expose_bearers_or_server_text(self):
         Server.jwt_mode = True
         self.assertEqual(self.run_cli('auth', 'login', '--events', '--delete-leads', '--browser-driver', str(self.driver))[0].returncode, 0)
@@ -823,8 +871,13 @@ urllib.request.urlopen(url, timeout=5).read()
             ('DELETE', '/api/v1/leads/7', ('leads', 'delete', '7', '--yes'), 'delete_uncertain', 'delete_uncertain'),
             ('POST', '/api/v1/logout', ('auth', 'logout'), 'network_error', 'http_error'),
         )
-        for method, path, command, bad_status, truncated in cases:
-            for kind, expected in (('bad-status', bad_status), ('truncated-503', truncated), ('nested-503', truncated)):
+        try:
+            json.loads('[' * 2000 + ']' * 2000)
+            nested_readable = True
+        except RecursionError:
+            nested_readable = False
+        for method, path, command, bad_status, readable_error in cases:
+            for kind, expected in (('bad-status', bad_status), ('truncated-503', bad_status), ('nested-503', readable_error if nested_readable else bad_status)):
                 for json_mode in (True, False):
                     with self.subTest(method=method, path=path, kind=kind, json_mode=json_mode):
                         Server.fault_requests = []
