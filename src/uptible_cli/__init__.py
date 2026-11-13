@@ -37,7 +37,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 OPENER = urllib.request.build_opener(NoRedirect())
 
-def request(url, form=None, bearer=None, method=None, _retry=True, payload=None, extra_headers=None):
+def request(url, form=None, bearer=None, method=None, _retry=True, payload=None, extra_headers=None, expected_status=None):
     headers = {"Accept": "application/json"}
     if bearer:
         headers["Authorization"] = "Bearer " + bearer
@@ -51,6 +51,8 @@ def request(url, form=None, bearer=None, method=None, _retry=True, payload=None,
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with OPENER.open(req, timeout=15) as response:
+            if expected_status is not None and response.status != expected_status:
+                raise Failure("unexpected_response", "Server returned an unexpected response.", 3)
             return json.load(response) if response.status != 204 else None
     except urllib.error.HTTPError as exc:
         if _retry and form is None and method is None and exc.code in (429, 503):
@@ -162,7 +164,7 @@ class Store:
         elif self.load():
             self.keyring.delete_password("uptible-cli", self.identity)
 
-def authorize(issuer, client, browser, timeout, delete_leads=False, events=False, billing=False, scopes=None):
+def authorize(issuer, client, browser, timeout, delete_leads=False, events=False, billing=False, delete_notifications=False, scopes=None):
     state = secrets.token_urlsafe(32)
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
@@ -194,7 +196,7 @@ def authorize(issuer, client, browser, timeout, delete_leads=False, events=False
     with HTTPServer(("127.0.0.1", 0), Handler) as server:
         server.timeout = 0.25
         callback = f"http://127.0.0.1:{server.server_port}/callback"
-        query = urllib.parse.urlencode({"response_type":"code", "client_id":client, "redirect_uri":callback, "scope":scopes or ("account:read notifications:read notifications:write installation:read activity:read leads:read statistics:read" + (" leads:delete" if delete_leads else "") + (" events:write" if events else "") + (" billing:read" if billing else "")), "state":state, "code_challenge":challenge, "code_challenge_method":"S256"})
+        query = urllib.parse.urlencode({"response_type":"code", "client_id":client, "redirect_uri":callback, "scope":scopes or ("account:read notifications:read notifications:write installation:read activity:read leads:read statistics:read" + (" leads:delete" if delete_leads else "") + (" events:write" if events else "") + (" billing:read" if billing else "") + (" notifications:delete" if delete_notifications else "")), "state":state, "code_challenge":challenge, "code_challenge_method":"S256"})
         url = issuer + "/oauth/authorize?" + query
         def launch():
             try:
@@ -236,7 +238,7 @@ def account_id(account):
     return account["id"]
 
 def upgrade(args, issuer, store, original):
-    additions = {scope for selected, scope in ((args.delete_leads, "leads:delete"), (args.events, "events:write"), (args.billing, "billing:read")) if selected}
+    additions = {scope for selected, scope in ((args.delete_leads, "leads:delete"), (args.events, "events:write"), (args.billing, "billing:read"), (args.delete_notifications, "notifications:delete")) if selected}
     if not additions:
         raise Failure("permissions_required", "Select at least one permission to add.", 2)
     if original.get("refresh_pending"):
@@ -255,8 +257,11 @@ def upgrade(args, issuer, store, original):
         new_account = request(issuer + "/api/v1/account", bearer=validated["access_token"])
         if account_id(new_account) != old_id:
             raise Failure("account_mismatch", "The approved account differs from the connected account. The existing connection was retained.", 3)
-        if not scopes <= granted_scopes(validated["access_token"]):
+        approved_scopes = granted_scopes(validated["access_token"])
+        if not scopes <= approved_scopes:
             raise Failure("permissions_missing", "The approved connection did not retain all requested permissions.", 3)
+        if approved_scopes != scopes:
+            raise Failure("permissions_unexpected", "The approved connection included unrequested permissions. The existing connection was retained.", 3)
         store.write(validated)
     except (Failure, OSError, ValueError, TypeError, KeyringError) as exc:
         try:
@@ -285,10 +290,19 @@ def run(args):
     args.client_id = args.client_id or DEFAULT_CLIENT_ID
     if args.command == "auth" and args.action == "login" and not 1 <= args.callback_timeout <= 600:
         raise Failure("invalid_timeout", "Callback timeout must be between 1 and 600 seconds.", 2)
-    if args.command == "leads" and args.action == "delete" and not args.yes:
+    if args.command in ("leads", "notifications") and args.action == "delete" and not args.yes:
         if not sys.stdin.isatty():
             raise Failure("confirmation_required", "Deletion requires confirmation. Use --yes for noninteractive deletion.", 2)
-        print(f"Permanently delete lead {args.id}? [y/N] ", end="", file=sys.stderr, flush=True)
+        prompt = (f"Permanently delete notification {args.id} and its collected leads? [y/N] "
+                  if args.command == "notifications" else f"Permanently delete lead {args.id}? [y/N] ")
+        if args.command == "notifications" and args.json:
+            try:
+                with open(os.ttyname(sys.stdin.fileno()), "w") as terminal:
+                    print(prompt, end="", file=terminal, flush=True)
+            except (AttributeError, OSError, ValueError):
+                raise Failure("confirmation_required", "Cannot display confirmation. Use --yes for noninteractive deletion.", 2) from None
+        else:
+            print(prompt, end="", file=sys.stderr, flush=True)
         try:
             answer = input().strip().lower()
         except EOFError:
@@ -305,7 +319,7 @@ def run(args):
                 if not token:
                     raise Failure("not_connected", "No saved connection. Run auth login first.")
                 return upgrade(args, issuer, store, token)
-            token = authorize(issuer, args.client_id, args.browser_driver, args.callback_timeout, args.delete_leads, args.events, args.billing)
+            token = authorize(issuer, args.client_id, args.browser_driver, args.callback_timeout, args.delete_leads, args.events, args.billing, args.delete_notifications)
             try:
                 validated = store.validate(token)
                 account = request(issuer + "/api/v1/account", bearer=validated["access_token"])
@@ -350,8 +364,9 @@ def run(args):
                     if kwargs.get("method"):
                         raise Failure("operation_not_retried", "The connection was refreshed. The write was not retried. For event submissions, retry the exact command with the same IDs and payload. For create, reuse the same key and input.", 3) from None
                     return request(url, bearer=token["access_token"], **kwargs)
-                if (exc.code == "network_error" or getattr(exc, "http_status", 0) >= 500) and args.command == "leads" and args.action == "delete":
-                    raise Failure("delete_uncertain", "The deletion outcome is unknown. Check the lead before deciding whether to retry.", 3) from None
+                if (exc.code in ("network_error", "unexpected_response") or getattr(exc, "http_status", 0) >= 500) and args.command in ("leads", "notifications") and args.action == "delete":
+                    resource = "lead" if args.command == "leads" else "notification"
+                    raise Failure("delete_uncertain", f"The deletion outcome is unknown. Check the {resource} before deciding whether to retry.", 3) from None
                 if (exc.code == "network_error" or getattr(exc, "http_status", 0) >= 500) and args.command == "notifications" and args.action == "create":
                     raise Failure("create_uncertain", "The create outcome is unknown. Retry the same input with the same idempotency key.", 3) from None
                 if (exc.code == "network_error" or getattr(exc, "http_status", 0) >= 500) and args.command == "events":
@@ -399,6 +414,9 @@ def run(args):
             return authenticated(path)
         if args.action == "activity":
             return authenticated(path + "/activity")
+        if args.action == "delete":
+            authenticated(path, method="DELETE", expected_status=204)
+            return {"deleted": True, "id": args.id}
         if args.action == "edit":
             payload = notification_payload(args)
             payload["revision"] = args.revision
@@ -446,6 +464,7 @@ def main():
     login = auth.add_parser("login")
     login.add_argument("--add", action="store_true", help="add selected permissions to the existing connection")
     login.add_argument("--delete-leads", action="store_true", help="request permission to permanently delete leads during browser consent")
+    login.add_argument("--delete-notifications", action="store_true", help="request permission to permanently delete notifications during browser consent")
     login.add_argument("--events", action="store_true", help="request permission to submit events")
     login.add_argument("--billing", action="store_true", help="request permission to read billing")
     login.add_argument("--browser-driver", help="executable that receives the authorization URL")
@@ -484,7 +503,7 @@ def main():
     status = billing.add_parser("status", description="Read billing status. Purchase eligibility does not guarantee checkout availability.")
     status.add_argument("--cursor", help="next_cursor for older orders")
     status.add_argument("--claim-cursor", help="next_claim_cursor for older purchase references")
-    notifications = sub.add_parser("notifications").add_subparsers(dest="action", required=True)
+    notifications = sub.add_parser("notifications", help="manage notifications").add_subparsers(dest="action", required=True)
     listing = notifications.add_parser("list")
     listing.add_argument("--limit", type=positive, default=20, choices=range(1, 101), metavar="1-100")
     listing.add_argument("--after", type=positive)
@@ -498,6 +517,9 @@ def main():
     for action in ("show", "activity", "activate", "deactivate", "archive", "restore"):
         command = notifications.add_parser(action)
         command.add_argument("id", type=positive)
+    delete = notifications.add_parser("delete", help="permanently delete a notification and its collected leads", description="Permanently delete one notification and its collected leads. This cannot be undone. Request permission with auth login --delete-notifications or auth login --add --delete-notifications. If the outcome is unknown, check the notification before retrying.")
+    delete.add_argument("id", type=positive)
+    delete.add_argument("--yes", action="store_true", help="confirm permanent deletion without prompting")
     args = p.parse_args()
     try:
         result = run(args)

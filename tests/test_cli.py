@@ -23,6 +23,7 @@ class Server(BaseHTTPRequestHandler):
     drop_refresh_response = False
     login_response = None
     jwt_mode = False
+    issued_scopes = None
     account_number = 42
     grant_number = 0
     current_refresh = "first"
@@ -114,7 +115,8 @@ class Server(BaseHTTPRequestHandler):
             if self.jwt_mode:
                 if form.get('grant_type') == ['authorization_code']:
                     type(self).grant_number += 1
-                claims = {'scopes': self.authorization['scope'][0].split(), 'account': self.account_number, 'grant': self.grant_number}
+                scopes = self.issued_scopes if self.issued_scopes is not None else self.authorization['scope'][0].split()
+                claims = {'scopes': scopes, 'account': self.account_number, 'grant': self.grant_number}
                 access = 'header.' + base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=') + '.signature'
             self.respond({'access_token': access, 'refresh_token': self.current_refresh, 'expires_in': 60})
         elif self.path == '/api/v1/logout' and self.reject_logout:
@@ -201,6 +203,7 @@ class CLI(unittest.TestCase):
     def setUp(self):
         Server.login_response = None
         Server.jwt_mode = False
+        Server.issued_scopes = None
         Server.account_number = 42
         Server.grant_number = 0
         Server.authorization = None
@@ -237,6 +240,71 @@ urllib.request.urlopen(url, timeout=5).read()
     def run_cli(self, *args, env=None):
         result = subprocess.run(self.base + list(args), capture_output=True, text=True, env=env, timeout=10)
         return result, json.loads(result.stdout or result.stderr)
+    def run_tty_cli(self, base, answer, *args):
+        import pty
+        import select
+        master, slave = pty.openpty()
+        process = subprocess.Popen(base + list(args), stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        os.close(slave)
+        try:
+            terminal = b''
+            deadline = time.monotonic() + 10
+            while b'[y/N]' not in terminal and process.poll() is None and time.monotonic() < deadline:
+                if select.select([master], [], [], 0.1)[0]:
+                    data = os.read(master, 8192)
+                    if not data:
+                        break
+                    terminal += data
+            if process.poll() is None:
+                os.write(master, answer)
+            stdout, stderr = process.communicate(timeout=10)
+            return process.returncode, stdout, stderr, terminal.decode()
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            os.close(master)
+    def test_notification_delete_permission_is_explicit_on_initial_login(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        default = set(Server.authorization['scope'][0].split())
+        self.assertNotIn('notifications:delete', default)
+        self.assertEqual(self.run_cli('auth', 'logout', '--local')[0].returncode, 0)
+        result = subprocess.run(self.base + ['auth', 'login', '--delete-notifications', '--browser-driver', str(self.driver)], capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(set(Server.authorization['scope'][0].split()), default | {'notifications:delete'})
+
+    def test_notification_delete_upgrade_retains_exact_scopes_and_account(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--events', '--browser-driver', str(self.driver))[0].returncode, 0)
+        original = self.creds.read_text()
+        old_scopes = set(Server.authorization['scope'][0].split())
+        requested = old_scopes | {'notifications:delete'}
+        command = ['auth', 'login', '--add', '--delete-notifications', '--browser-driver', str(self.driver)]
+        denied = subprocess.run(self.base + command, capture_output=True, text=True, timeout=10, env=dict(os.environ, DENY='1'))
+        self.assertEqual(denied.returncode, 1, denied.stderr)
+        self.assertEqual(json.loads(denied.stderr)['error']['code'], 'authorization_denied')
+        self.assertEqual(self.creds.read_text(), original)
+        self.assertEqual(set(Server.authorization['scope'][0].split()), requested)
+        Server.account_number = 43
+        result, body = self.run_cli(*command)
+        self.assertEqual(body['error']['code'], 'account_mismatch')
+        self.assertEqual(self.creds.read_text(), original)
+        Server.account_number = 42
+        for issued, error in ((old_scopes, 'permissions_missing'), (requested | {'leads:delete'}, 'permissions_unexpected')):
+            Server.issued_scopes = sorted(issued)
+            result, body = self.run_cli(*command)
+            self.assertEqual(result.returncode, 3, body)
+            self.assertEqual(body['error']['code'], error)
+            self.assertEqual(self.creds.read_text(), original)
+            self.assertEqual(self.run_cli('auth', 'status')[1]['account']['id'], 42)
+        Server.issued_scopes = None
+        result, body = self.run_cli(*command)
+        self.assertEqual(result.returncode, 0, body)
+        self.assertEqual(set(Server.authorization['scope'][0].split()), requested)
+        self.assertNotEqual(self.creds.read_text(), original)
+        self.assertEqual(self.run_cli('auth', 'status')[1]['account']['id'], 42)
+
     def test_permission_upgrade_retains_scope_and_rejects_other_account(self):
         Server.jwt_mode = True
         self.assertEqual(self.run_cli('auth', 'login', '--events', '--browser-driver', str(self.driver))[0].returncode, 0)
@@ -285,7 +353,7 @@ urllib.request.urlopen(url, timeout=5).read()
         Server.jwt_mode = True
         self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
         original = self.creds.read_text()
-        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, add=True, delete_leads=False, events=True, billing=False, browser_driver=str(self.driver))
+        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, add=True, delete_leads=False, delete_notifications=False, events=True, billing=False, browser_driver=str(self.driver))
         with patch.object(uptible_cli.Store, 'write', side_effect=OSError('disk failure')):
             with self.assertRaises(OSError):
                 uptible_cli.run(args)
@@ -318,7 +386,7 @@ urllib.request.urlopen(url, timeout=5).read()
         Server.jwt_mode = True
         self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
         original = self.creds.read_text()
-        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, add=True, delete_leads=False, events=True, billing=False, browser_driver=str(self.driver))
+        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, add=True, delete_leads=False, delete_notifications=False, events=True, billing=False, browser_driver=str(self.driver))
         write = uptible_cli.Store.write
         def save_then_fail(store, value):
             write(store, value)
@@ -424,6 +492,32 @@ urllib.request.urlopen(url, timeout=5).read()
         result, body = self.run_cli('stats', 'show')
         self.assertEqual((result.returncode, body['error']['code']), (3, 'invalid_grant'))
         self.assertNotIn('rotated', result.stderr)
+
+    def test_notification_delete_unapproved_never_opens_connection(self):
+        unavailable = self.path / 'untouched' / 'credentials'
+        base = self.base.copy()
+        base[base.index(str(self.creds))] = str(unavailable)
+        command = ['notifications', 'delete', '7']
+        result = subprocess.run(base + command, input='', capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(json.loads(result.stderr)['error']['code'], 'confirmation_required')
+        for answer in (b'n\n', b'\x04'):
+            code, stdout, stderr, terminal = self.run_tty_cli(base, answer, *command)
+            self.assertEqual(code, 1, stderr)
+            self.assertEqual(stdout, '')
+            self.assertEqual(json.loads(stderr)['error']['code'], 'delete_cancelled')
+            self.assertIn('Permanently delete notification 7', terminal)
+            self.assertIn('lead', terminal)
+        self.assertFalse(unavailable.parent.exists())
+        self.assertEqual(Server.calls, [])
+        self.assertEqual(Server.operations, [])
+
+    def test_notification_delete_yes_returns_confirmed_result(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        result = subprocess.run(self.base + ['notifications', 'delete', '7', '--yes'], capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {'deleted': True, 'id': 7})
+        self.assertEqual(Server.operations, [('DELETE', '/api/v1/notifications/7')])
 
     def test_notification_commands_and_recovery(self):
         self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
