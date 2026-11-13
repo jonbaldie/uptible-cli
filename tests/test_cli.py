@@ -1550,6 +1550,18 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertIn('same idempotency key', body['error']['message'])
         self.assertEqual(len(Server.operations), 2)
 
+    def test_problem_responses_keep_safe_context(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        correlation = '481e2370-b81f-4b8d-b02f-ad00f08c8444'
+        Server.api_error = (409, {'type': 'about:blank', 'status': 409, 'code': 'conflict',
+                                  'correlation_id': correlation, 'detail': 'synthetic-secret-marker'})
+        result, body = self.run_cli('stats', 'show')
+        self.assertEqual(result.returncode, 3)
+        self.assertEqual(body['error']['code'], 'conflict')
+        self.assertEqual(body['error']['http_status'], 409)
+        self.assertEqual(body['error']['correlation_id'], correlation)
+        self.assertNotIn('synthetic-secret-marker', result.stderr)
+
     def test_notification_error_boundaries(self):
         self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
         command = ('notifications', 'create', '--idempotency-key', 'key', '--message', 'Hello')
