@@ -1,0 +1,89 @@
+{
+  "source_revision": "61a24e1726b04e64734d457bb543c898dd9c331c",
+  "source_date_epoch": 1794573203,
+  "version": "0.1.0",
+  "python": "3.14.5 (main, May 10 2026, 10:21:34) [Clang 21.0.0 (clang-2100.0.123.102)]",
+  "platform": "darwin",
+  "build_started_ns": [
+    1794573203616064000,
+    1794573213596655000
+  ],
+  "artifacts": {
+    "uptible_cli-0.1.0-py3-none-any.whl": "c0529f0dc62e40c50de804a5fa8bf05d83a378211a9d3c95246e72eae5408cee",
+    "uptible_cli-0.1.0.tar.gz": "df8ef3507dd93764639790cbf66e1298fa1c5b712f669541d035a1428b310112"
+  },
+  "build_dependencies": [
+    {
+      "name": "build",
+      "version": "1.3.0",
+      "sha256": "7145f0b5061ba90a1500d60bd1b13ca0a8a4cebdd0cc16ed8adf1c0e739f43b4"
+    },
+    {
+      "name": "packaging",
+      "version": "25.0",
+      "sha256": "29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484"
+    },
+    {
+      "name": "pip",
+      "version": "26.3",
+      "sha256": "f3b60b20ffaadd4415ed7957212a38ac63fa4c5fa375bd0f4a797777940fad13"
+    },
+    {
+      "name": "pyproject-hooks",
+      "version": "1.2.0",
+      "sha256": "9e5c6bfa8dcc30091c74b0cf803c81fdd29d94f01992a7707bc97babb1141913"
+    },
+    {
+      "name": "setuptools",
+      "version": "84.2.1",
+      "sha256": "ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2"
+    },
+    {
+      "name": "wheel",
+      "version": "0.48.0",
+      "sha256": "3217dcc807155e45db462d7ef2431f5ddda0d7273b700d05a67b271ceb1287ab"
+    }
+  ],
+  "runtime_dependencies": [
+    {
+      "name": "filelock",
+      "version": "4.2.10",
+      "sha256": "9479aaeb4db20b5a53e3da28493edd24720b66b8a0b84030aa56ccdf243d6857"
+    },
+    {
+      "name": "jaraco.classes",
+      "version": "3.4.0",
+      "sha256": "f662826b6bed8cace05e7ff873ce0f9283b5c924470fe664fff1c2f00f581790"
+    },
+    {
+      "name": "jaraco.context",
+      "version": "6.1.2",
+      "sha256": "bf8150b79a2d5d91ae48629d8b427a8f7ba0e1097dd6202a9059f29a36379535"
+    },
+    {
+      "name": "jaraco.functools",
+      "version": "4.6.0",
+      "sha256": "99e3dc0060c5cbe8fcd1cdb36258e2a65ca40f1566b2033b12abb1bb44dd3c30"
+    },
+    {
+      "name": "keyring",
+      "version": "25.7.0",
+      "sha256": "be4a0b195f149690c166e850609a477c532ddbfbaed96a404d4e43f8d5e2689f"
+    },
+    {
+      "name": "more-itertools",
+      "version": "11.2.1",
+      "sha256": "35a7377edd1dd6608dcb2cdf534ded55ea32d49448875ad042cd3f879fb1ded0"
+    }
+  ],
+  "module_sha256": "1b7b1b4ade0dec5d18d41d63e40c5102c5950d45eb2343cc1c7b14da6fb6b8a7",
+  "inputs": {
+    "verification-requirements.txt": "587359cbd9407e2c90acfb53b0f6a94e0e08cb7b9e758edd8d64edb4f16262f3",
+    "runtime-requirements.txt": "72e1771b2ac15527fff57059546f948331644ab1f95627b3258f9f5abbb8886b",
+    "homebrew-resources.json": "a2b4eff722a1e0f9f6f7b85957ac70cfe195216cbb641aec748a8a2c1b056867"
+  },
+  "negative_controls": [
+    "tampered dependency hash rejected",
+    "unexpected wheel member rejected"
+  ]
+}
