@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -243,10 +244,28 @@ def token_subject(access):
     except Exception:
         raise Failure("account_unknown", "Cannot verify the connected account. The connection remains unchanged.", 3) from None
 
-def refresh_connection(issuer, client, store, original, scopes=None):
+def recovery_instructions(args):
+    options = ["--json"] if args.json else []
+    if args.issuer:
+        options.append("--issuer=" + args.issuer)
+    if args.client_id != DEFAULT_CLIENT_ID or args.issuer:
+        options.append("--client-id=" + args.client_id)
+    if args.profile != "default":
+        options.append("--profile=" + args.profile)
+    if args.credential_file is not None:
+        options.append("--credential-file=" + args.credential_file)
+    command = ["uptible", *options, "auth"]
+    logout = shlex.join([*command, "logout", "--local"])
+    login = shlex.join([*command, "login"])
+    return "Revoke the connection in your account, then run these commands to reconnect:\n" + logout + "\n" + login
+
+def refresh_connection(issuer, client, store, original, recovery, scopes=None):
     old_id = original.get("account_id")
     if type(old_id) is not int:
-        old_id = token_subject(original["access_token"])
+        try:
+            old_id = token_subject(original["access_token"])
+        except Failure as exc:
+            raise Failure(exc.code, exc.message + " " + recovery, exc.exit_code) from None
     original["refresh_pending"] = True
     store.write(original)
     refreshed = store.validate(request(issuer + "/oauth/token", {"grant_type":"refresh_token", "client_id":client, "refresh_token":original["refresh_token"]}))
@@ -256,24 +275,27 @@ def refresh_connection(issuer, client, store, original, scopes=None):
         account = request(issuer + "/api/v1/account", bearer=refreshed["access_token"])
         refreshed_id = account_id(account)
     except Failure:
-        raise Failure("refresh_uncertain", "Cannot verify the refreshed connection. Revoke the connection in your account and reconnect.", 3) from None
+        raise Failure("refresh_uncertain", "Cannot verify the refreshed connection. " + recovery, 3) from None
     if scopes is not None and refreshed_scopes != scopes:
-        raise Failure("refresh_permissions_changed", "The refreshed connection has different permissions. Revoke the connection in your account and reconnect.", 3)
+        raise Failure("refresh_permissions_changed", "The refreshed connection has different permissions. " + recovery, 3)
     if refreshed_id != old_id:
-        raise Failure("refresh_account_changed", "The refreshed connection belongs to a different account. It was not saved. Revoke the connection in your account and reconnect.", 3)
+        raise Failure("refresh_account_changed", "The refreshed connection belongs to a different account. It was not saved. " + recovery, 3)
     refreshed["account_id"] = old_id
     store.write(refreshed)
     return refreshed, account
 
-def upgrade(args, issuer, store, original):
+def upgrade(args, issuer, store, original, recovery):
     additions = {scope for selected, scope in ((args.delete_leads, "leads:delete"), (args.events, "events:write"), (args.billing, "billing:read"), (args.delete_notifications, "notifications:delete")) if selected}
+    if original.get("refresh_pending"):
+        raise Failure("refresh_uncertain", "The existing refresh outcome is unknown. " + recovery, 3)
     if not additions:
         raise Failure("permissions_required", "Select at least one permission to add.", 2)
-    if original.get("refresh_pending"):
-        raise Failure("refresh_uncertain", "The existing refresh outcome is unknown. Recover the connection before adding permissions.", 3)
-    old_scopes = granted_scopes(original["access_token"])
+    try:
+        old_scopes = granted_scopes(original["access_token"])
+    except Failure as exc:
+        raise Failure(exc.code, exc.message + " " + recovery, exc.exit_code) from None
     if time.time() >= original["expires_at"]:
-        original, old_account = refresh_connection(issuer, args.client_id, store, original, old_scopes)
+        original, old_account = refresh_connection(issuer, args.client_id, store, original, recovery, old_scopes)
     else:
         old_account = request(issuer + "/api/v1/account", bearer=original["access_token"])
     old_id = account_id(old_account)
@@ -317,6 +339,7 @@ def run(args):
     if issuer != DEFAULT_ISSUER and not args.client_id:
         raise Failure("client_id_required", "An alternate service requires its registered public client ID via --client-id.", 2)
     args.client_id = args.client_id or DEFAULT_CLIENT_ID
+    recovery = recovery_instructions(args)
     if args.command == "auth" and args.action == "login" and not 1 <= args.callback_timeout <= 600:
         raise Failure("invalid_timeout", "Callback timeout must be between 1 and 600 seconds.", 2)
     if args.command in ("leads", "notifications") and args.action == "delete" and not args.yes:
@@ -343,11 +366,23 @@ def run(args):
         token = store.load()
         if args.command == "auth" and args.action == "login":
             if token and not args.add:
-                raise Failure("already_connected", "Connection already exists. Use auth login --add to add permissions.")
+                message = "Connection already exists. "
+                if token.get("refresh_pending"):
+                    message += "The existing refresh outcome is unknown. "
+                else:
+                    try:
+                        granted_scopes(token["access_token"])
+                        if type(token.get("account_id")) is not int and time.time() >= token["expires_at"]:
+                            token_subject(token["access_token"])
+                    except Failure:
+                        message += "The existing connection cannot be verified. "
+                    else:
+                        message += "Use auth login --add to add permissions. To replace the connection, follow these steps. "
+                raise Failure("already_connected", message + recovery)
             if args.add:
                 if not token:
                     raise Failure("not_connected", "No saved connection. Run auth login first.")
-                return upgrade(args, issuer, store, token)
+                return upgrade(args, issuer, store, token, recovery)
             token = authorize(issuer, args.client_id, args.browser_driver, args.callback_timeout, args.delete_leads, args.events, args.billing, args.delete_notifications)
             try:
                 validated = store.validate(token)
@@ -373,9 +408,9 @@ def run(args):
                 return {"connected": False}
             raise Failure("not_connected", "No saved connection. Run auth login.")
         if token.get("refresh_pending"):
-            raise Failure("refresh_uncertain", "A refresh may have been consumed. Revoke the connection in your account, then use auth logout --local and reconnect.", 3)
+            raise Failure("refresh_uncertain", "A refresh may have been consumed. " + recovery, 3)
         if time.time() >= token["expires_at"]:
-            token, _ = refresh_connection(issuer, args.client_id, store, token)
+            token, _ = refresh_connection(issuer, args.client_id, store, token, recovery)
         if args.command == "auth" and args.action == "logout":
             request(issuer + "/api/v1/logout", form={}, bearer=token["access_token"])
             store.delete()
@@ -386,7 +421,7 @@ def run(args):
                 return request(url, bearer=token["access_token"], **kwargs)
             except Failure as exc:
                 if getattr(exc, "http_status", None) == 401:
-                    token, _ = refresh_connection(issuer, args.client_id, store, token)
+                    token, _ = refresh_connection(issuer, args.client_id, store, token, recovery)
                     if kwargs.get("method"):
                         if args.command == "notifications" and args.action == "delete":
                             raise Failure("operation_not_retried", "The connection was refreshed. The deletion was not retried. Check the notification before deciding whether to retry.", 3) from None
