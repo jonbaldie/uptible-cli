@@ -6,8 +6,50 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import urllib.parse
 import uuid
+
+
+class IntegrationTargetGuard(unittest.TestCase):
+    def run_target(self, issuer):
+        with mock.patch.dict(os.environ, {
+            'UPTIBLE_TEST_ISSUER': issuer,
+            'UPTIBLE_TEST_CLIENT_ID': 'synthetic-client',
+            'UPTIBLE_TEST_ACCOUNT_ID': '1',
+        }, clear=True):
+            ActualAccount('test_browser_login_and_owned_draft').test_browser_login_and_owned_draft()
+
+    def test_production_aliases_never_start_login(self):
+        for issuer in (
+            'https://uptible.com', 'https://www.uptible.com', 'https://UPTIBLE.COM',
+            'https://uptible.com.', 'https://www.uptible.com.',
+            'https://ｕｐｔｉｂｌｅ.com', 'https://uptible。com',
+        ):
+            with self.subTest(issuer=issuer), mock.patch.object(
+                subprocess, 'run', side_effect=AssertionError('Login must not start'),
+            ) as run:
+                with self.assertRaises(AssertionError):
+                    self.run_target(issuer)
+                run.assert_not_called()
+
+    def test_malformed_hostname_never_starts_login(self):
+        with mock.patch.object(subprocess, 'run', side_effect=AssertionError('Login must not start')) as run:
+            with self.assertRaises(AssertionError):
+                self.run_target('https://invalid..test')
+            run.assert_not_called()
+
+    def test_dedicated_target_reaches_login(self):
+        for issuer in ('http://127.0.0.1:8765', 'https://dedicated.example.test'):
+            with self.subTest(issuer=issuer), mock.patch.object(
+                subprocess, 'run', side_effect=RuntimeError('controlled login boundary'),
+            ) as run:
+                with self.assertRaisesRegex(RuntimeError, 'controlled login boundary'):
+                    self.run_target(issuer)
+                run.assert_called_once()
+                self.assertEqual(run.call_args.args[0][-5:], [
+                    'auth', 'login', '--delete-notifications', '--callback-timeout', '600',
+                ])
 
 
 @unittest.skipUnless(os.environ.get('UPTIBLE_INTEGRATION') == 'dedicated-test-account',
