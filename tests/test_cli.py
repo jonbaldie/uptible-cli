@@ -35,6 +35,9 @@ class Server(BaseHTTPRequestHandler):
     api_error = None
     notification_records = None
     delete_success_status = 204
+    response_fault = None
+    fault_requests = []
+    account_payload = None
     event_receipt = {'receipt': 'synthetic-receipt', 'status': 'processed'}
     statistics = {'hour_captures_count': 1, 'captures_count': 2, 'all_captures_count': 3, 'tracks_count': 4, 'as_of': '2026-01-02T00:00:00Z', 'hour_start': '2026-01-01T23:00:00Z', 'day_start': '2026-01-01T00:00:00Z'}
     def log_message(self, *args):
@@ -45,8 +48,28 @@ class Server(BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
         self.wfile.write(raw)
+    def damaged_response(self, raw=b''):
+        if not self.response_fault or self.response_fault[:2] != (self.command, self.path):
+            return False
+        echoed = self.headers.get('Authorization', '').encode() + b' ' + raw
+        self.fault_requests.append((self.command, self.path, echoed))
+        if self.response_fault[2] == 'bad-status':
+            self.connection.sendall(b'INVALID synthetic-untrusted-marker ' + echoed + b'\r\n\r\n')
+        else:
+            partial = b'{"error":"synthetic-untrusted-marker ' + echoed + b'"'
+            self.send_response(503)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(partial) + 100))
+            self.end_headers()
+            self.wfile.write(partial)
+            self.wfile.flush()
+        self.close_connection = True
+        return True
     def do_POST(self):
-        raw = self.rfile.read(int(self.headers.get('Content-Length', 0))).decode()
+        raw = self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        if self.damaged_response(raw):
+            return
+        raw = raw.decode()
         if self.path.startswith('/api/v1/notifications/') and self.path.endswith(('/capture', '/track')):
             self.operations.append(('POST', self.path, json.loads(raw)))
             if self.api_error:
@@ -116,6 +139,8 @@ class Server(BaseHTTPRequestHandler):
                     self.connection.close()
                     return
             access = 'access'
+            if not self.jwt_mode and form.get('grant_type') == ['refresh_token'] and self.refresh_account is not None:
+                access = 'opaque-account-' + str(self.refresh_account)
             if self.jwt_mode:
                 if form.get('grant_type') == ['authorization_code']:
                     type(self).grant_number += 1
@@ -135,6 +160,8 @@ class Server(BaseHTTPRequestHandler):
             self.respond({'error': 'unknown'}, 404)
     def do_PUT(self):
         raw = self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        if self.damaged_response(raw):
+            return
         self.operations.append(('PUT', self.path, json.loads(raw)))
         if self.path == '/api/v1/notifications/7' and json.loads(raw).get('revision') != 2:
             self.respond({'error': 'conflict'}, 409)
@@ -167,12 +194,16 @@ class Server(BaseHTTPRequestHandler):
                 self.respond({'status': 'accepted'}, self.delete_success_status)
                 return
             del self.notification_records[identifier]
+            if self.damaged_response():
+                return
             if self.drop_create:
                 self.connection.shutdown(2)
                 self.connection.close()
             else:
                 self.send_response(204)
                 self.end_headers()
+            return
+        if self.damaged_response():
             return
         if self.drop_create:
             self.connection.shutdown(2)
@@ -183,6 +214,8 @@ class Server(BaseHTTPRequestHandler):
             self.send_response(204)
             self.end_headers()
     def do_GET(self):
+        if self.damaged_response():
+            return
         if self.reject_next and self.path.startswith('/api/'):
             type(self).reject_next = False
             self.respond({'error': 'unauthorized'}, 401)
@@ -223,6 +256,8 @@ class Server(BaseHTTPRequestHandler):
             self.respond({'ok': True})
         elif self.path == '/api/v1/account' and self.account_error is not None:
             self.respond({'error': self.account_error}, 503)
+        elif self.path == '/api/v1/account' and self.account_payload is not None:
+            self.respond(self.account_payload)
         elif self.path == '/api/v1/account' and self.headers.get('Authorization', '').startswith('Bearer '):
             access = self.headers['Authorization'][7:]
             if self.jwt_mode:
@@ -230,6 +265,8 @@ class Server(BaseHTTPRequestHandler):
                 identity = json.loads(base64.urlsafe_b64decode(part + '=' * (-len(part) % 4)))['account']
             elif access == 'access':
                 identity = 42
+            elif access.startswith('opaque-account-') and access.removeprefix('opaque-account-').isdigit():
+                identity = int(access.removeprefix('opaque-account-'))
             else:
                 self.respond({'error': 'unauthorized'}, 401)
                 return
@@ -269,6 +306,9 @@ class CLI(unittest.TestCase):
         Server.api_error = None
         Server.notification_records = None
         Server.delete_success_status = 204
+        Server.response_fault = None
+        Server.fault_requests = []
+        Server.account_payload = None
         Server.event_receipt = {'receipt': 'synthetic-receipt', 'status': 'processed'}
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -415,6 +455,7 @@ urllib.request.urlopen(url, timeout=5).read()
         Server.jwt_mode = True
         self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
         saved = json.loads(self.creds.read_text())
+        saved.pop('account_id', None)
         part = saved['access_token'].split('.')[1]
         claims = json.loads(base64.urlsafe_b64decode(part + '=' * (-len(part) % 4)))
         del claims['sub']
@@ -703,6 +744,211 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(result.stdout, '')
         self.assertEqual(Server.operations.count(('DELETE', '/api/v1/notifications/9')), 1)
         self.assertEqual(set(Server.notification_records), {8, 9})
+
+    def test_notification_delete_protocol_damage_is_uncertain_without_replay(self):
+        Server.jwt_mode = True
+        Server.notification_records = {7: {'owner': 42}, 8: {'owner': 42}}
+        self.assertEqual(self.run_cli('auth', 'login', '--delete-notifications', '--browser-driver', str(self.driver))[0].returncode, 0)
+        access = json.loads(self.creds.read_text())['access_token']
+        for identifier, kind in ((7, 'bad-status'), (8, 'truncated-503')):
+            with self.subTest(kind=kind):
+                path = '/api/v1/notifications/' + str(identifier)
+                Server.response_fault = ('DELETE', path, kind)
+                result = subprocess.run(self.base + ['notifications', 'delete', str(identifier), '--yes'], capture_output=True, text=True, timeout=10)
+                Server.response_fault = None
+                shown, body = self.run_cli('notifications', 'show', str(identifier))
+                self.assertEqual(Server.operations.count(('DELETE', path)), 1)
+                self.assertEqual(shown.returncode, 3)
+                self.assertIn('404', body['error']['message'])
+                self.assertTrue(access.encode() in Server.fault_requests[-1][2])
+                self.assertFalse(access in result.stderr, 'The bearer credential reached the error output')
+                self.assertFalse('synthetic-untrusted-marker' in result.stderr, 'Server text reached the error output')
+                self.assertEqual(result.returncode, 3, 'A damaged delete response must be an operational error')
+                self.assertEqual(result.stdout, '')
+                self.assertEqual(json.loads(result.stderr)['error']['code'], 'delete_uncertain')
+
+    def test_request_faults_never_expose_bearers_or_server_text(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--events', '--delete-leads', '--browser-driver', str(self.driver))[0].returncode, 0)
+        access = json.loads(self.creds.read_text())['access_token']
+        cases = (
+            ('GET', '/api/v1/account', ('account', 'show'), 'network_error', 'http_error'),
+            ('POST', '/api/v1/notifications', ('notifications', 'create', '--idempotency-key', 'key', '--message', 'synthetic-request-body-marker'), 'create_uncertain', 'create_uncertain'),
+            ('POST', '/api/v1/notifications/7/track', ('events', 'track', '7', '--session-id', 'synthetic-session-marker', '--event-id', 'event'), 'event_uncertain', 'event_uncertain'),
+            ('PUT', '/api/v1/notifications/7', ('notifications', 'edit', '7', '--revision', '2', '--message', 'synthetic-request-body-marker'), 'network_error', 'http_error'),
+            ('DELETE', '/api/v1/leads/7', ('leads', 'delete', '7', '--yes'), 'delete_uncertain', 'delete_uncertain'),
+            ('POST', '/api/v1/logout', ('auth', 'logout'), 'network_error', 'http_error'),
+        )
+        for method, path, command, bad_status, truncated in cases:
+            for kind, expected in (('bad-status', bad_status), ('truncated-503', truncated)):
+                for json_mode in (True, False):
+                    with self.subTest(method=method, path=path, kind=kind, json_mode=json_mode):
+                        Server.fault_requests = []
+                        Server.response_fault = (method, path, kind)
+                        base = self.base if json_mode else [value for value in self.base if value != '--json']
+                        result = subprocess.run(base + list(command), capture_output=True, text=True, timeout=10)
+                        self.assertTrue(Server.fault_requests)
+                        self.assertTrue(access.encode() in Server.fault_requests[-1][2])
+                        self.assertFalse(access in result.stdout or access in result.stderr, 'The bearer credential reached output')
+                        self.assertFalse('synthetic-untrusted-marker' in result.stdout or 'synthetic-untrusted-marker' in result.stderr, 'Server text reached output')
+                        for marker in ('synthetic-request-body-marker', 'synthetic-session-marker'):
+                            self.assertFalse(marker in result.stdout or marker in result.stderr, 'The request body reached output')
+                        self.assertEqual(result.returncode, 3, 'A damaged response must be an operational error')
+                        self.assertEqual(result.stdout, '')
+                        if json_mode:
+                            self.assertEqual(json.loads(result.stderr)['error']['code'], expected)
+                        else:
+                            self.assertTrue(result.stderr.startswith('Error: '))
+        Server.response_fault = None
+
+    def test_login_fault_never_exposes_the_authorization_form(self):
+        Server.jwt_mode = True
+        Server.response_fault = ('POST', '/oauth/token', 'bad-status')
+        result = subprocess.run(self.base + ['auth', 'login', '--browser-driver', str(self.driver)], capture_output=True, text=True, timeout=10)
+        form = urllib.parse.parse_qs(Server.fault_requests[-1][2].decode().strip())
+        verifier = form['code_verifier'][0]
+        self.assertTrue(verifier)
+        self.assertFalse(verifier in result.stdout or verifier in result.stderr, 'The authorization verifier reached output')
+        self.assertFalse('code_verifier' in result.stderr, 'The authorization form reached error output')
+        self.assertFalse('synthetic-untrusted-marker' in result.stderr, 'Server text reached error output')
+        self.assertEqual(result.returncode, 3)
+        self.assertEqual(json.loads(result.stderr)['error']['code'], 'login_uncertain')
+        self.assertFalse(self.creds.exists())
+
+    def test_refresh_fault_never_exposes_the_refresh_credential(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        saved = json.loads(self.creds.read_text())
+        saved['refresh_token'] = 'synthetic-refresh-secret-marker'
+        saved['expires_at'] = 0
+        self.creds.write_text(json.dumps(saved))
+        Server.current_refresh = saved['refresh_token']
+        Server.response_fault = ('POST', '/oauth/token', 'bad-status')
+        result = subprocess.run(self.base + ['account', 'show'], capture_output=True, text=True, timeout=10)
+        self.assertTrue(saved['refresh_token'].encode() in Server.fault_requests[-1][2])
+        self.assertFalse(saved['refresh_token'] in result.stderr, 'The refresh credential reached error output')
+        self.assertFalse('synthetic-untrusted-marker' in result.stderr, 'Server text reached error output')
+        self.assertEqual(result.returncode, 3)
+        self.assertEqual(json.loads(result.stderr)['error']['code'], 'network_error')
+        pending = json.loads(self.creds.read_text())
+        self.assertEqual(pending['access_token'], saved['access_token'])
+        self.assertEqual(pending['refresh_token'], saved['refresh_token'])
+        self.assertTrue(pending['refresh_pending'])
+
+    def test_login_cleanup_fault_never_exposes_the_bearer(self):
+        Server.jwt_mode = True
+        Server.account_error = 'synthetic-account-error'
+        Server.response_fault = ('POST', '/api/v1/logout', 'bad-status')
+        result = subprocess.run(self.base + ['auth', 'login', '--browser-driver', str(self.driver)], capture_output=True, text=True, timeout=10)
+        echoed = Server.fault_requests[-1][2].decode()
+        access = echoed.removeprefix('Bearer ').strip()
+        self.assertTrue(access)
+        self.assertFalse(access in result.stderr, 'The cleanup bearer credential reached error output')
+        self.assertFalse('synthetic-untrusted-marker' in result.stderr, 'Server text reached error output')
+        self.assertEqual(result.returncode, 3)
+        self.assertEqual(json.loads(result.stderr)['error']['code'], 'cleanup_unconfirmed')
+        self.assertFalse(self.creds.exists())
+
+    def test_ordinary_refresh_rejects_another_account_before_delete_or_read(self):
+        for storage in ('new', 'legacy-jwt'):
+            for trigger in ('expired', '401'):
+                for first_command in ('delete', 'read'):
+                    with self.subTest(storage=storage, trigger=trigger, first_command=first_command):
+                        self.creds.unlink(missing_ok=True)
+                        Server.jwt_mode = True
+                        Server.refresh_account = None
+                        Server.current_refresh = 'first'
+                        Server.refreshes = 0
+                        Server.reject_next = False
+                        Server.operations = []
+                        Server.notification_records = {7: {'owner': 43}}
+                        self.assertEqual(self.run_cli('auth', 'login', '--delete-notifications', '--browser-driver', str(self.driver))[0].returncode, 0)
+                        saved = json.loads(self.creds.read_text())
+                        if storage == 'legacy-jwt':
+                            saved.pop('account_id', None)
+                        if trigger == 'expired':
+                            saved['expires_at'] = 0
+                        self.creds.write_text(json.dumps(saved))
+                        Server.refresh_account = 43
+                        Server.reject_next = trigger == '401'
+                        command = ('notifications', 'delete', '7', '--yes') if first_command == 'delete' else ('account', 'show')
+                        result, body = self.run_cli(*command)
+                        self.assertEqual((result.returncode, body.get('error', {}).get('code')), (3, 'refresh_account_changed'))
+                        self.assertIn('reconnect', body['error']['message'])
+                        pending = json.loads(self.creds.read_text())
+                        self.assertEqual(pending, dict(saved, refresh_pending=True))
+                        self.assertEqual(Server.refreshes, 1)
+                        expected_deletes = 1 if trigger == '401' and first_command == 'delete' else 0
+                        self.assertEqual(Server.operations.count(('DELETE', '/api/v1/notifications/7')), expected_deletes)
+                        retry, retry_body = self.run_cli('notifications', 'delete', '7', '--yes')
+                        self.assertEqual((retry.returncode, retry_body['error']['code']), (3, 'refresh_uncertain'))
+                        self.assertEqual(Server.operations.count(('DELETE', '/api/v1/notifications/7')), expected_deletes)
+                        self.assertEqual(Server.notification_records, {7: {'owner': 43}})
+
+    def test_opaque_connection_rejects_refresh_for_another_account(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        saved = json.loads(self.creds.read_text())
+        saved['expires_at'] = 0
+        self.creds.write_text(json.dumps(saved))
+        Server.refresh_account = 43
+        result, body = self.run_cli('account', 'show')
+        self.assertEqual((result.returncode, body.get('error', {}).get('code')), (3, 'refresh_account_changed'))
+        self.assertEqual(json.loads(self.creds.read_text()), dict(saved, refresh_pending=True))
+        self.assertEqual(Server.refreshes, 1)
+
+    def test_refresh_requires_a_verifiable_account_before_saving(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        saved = json.loads(self.creds.read_text())
+        saved['expires_at'] = 0
+        self.creds.write_text(json.dumps(saved))
+        Server.account_error = 'synthetic-untrusted-marker'
+        result, body = self.run_cli('account', 'show')
+        self.assertEqual((result.returncode, body['error']['code']), (3, 'refresh_uncertain'))
+        self.assertFalse('synthetic-untrusted-marker' in result.stderr)
+        self.assertEqual(json.loads(self.creds.read_text()), dict(saved, refresh_pending=True))
+        self.assertEqual(Server.refreshes, 1)
+        self.assertEqual(self.run_cli('account', 'show')[1]['error']['code'], 'refresh_uncertain')
+        self.assertEqual(Server.refreshes, 1)
+
+    def test_legacy_jwt_refresh_records_the_verified_account(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        saved = json.loads(self.creds.read_text())
+        saved.pop('account_id', None)
+        saved['expires_at'] = 0
+        self.creds.write_text(json.dumps(saved))
+        result, body = self.run_cli('account', 'show')
+        self.assertEqual((result.returncode, body['id']), (0, 42))
+        self.assertEqual(json.loads(self.creds.read_text())['account_id'], 42)
+
+    def test_legacy_opaque_credentials_require_a_known_account_before_refresh(self):
+        for trigger in ('expired', '401'):
+            with self.subTest(trigger=trigger):
+                self.creds.unlink(missing_ok=True)
+                Server.jwt_mode = False
+                Server.current_refresh = 'first'
+                Server.refreshes = 0
+                Server.reject_next = False
+                self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+                saved = json.loads(self.creds.read_text())
+                saved.pop('account_id', None)
+                if trigger == 'expired':
+                    saved['expires_at'] = 0
+                self.creds.write_text(json.dumps(saved))
+                before = self.creds.read_bytes()
+                Server.reject_next = trigger == '401'
+                result, body = self.run_cli('account', 'show')
+                self.assertEqual((result.returncode, body.get('error', {}).get('code')), (3, 'account_unknown'))
+                self.assertEqual(self.creds.read_bytes(), before)
+                self.assertEqual(Server.refreshes, 0)
+
+    def test_login_requires_a_verifiable_account_before_saving(self):
+        Server.account_payload = {'name': 'Synthetic'}
+        result, body = self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
+        self.assertEqual((result.returncode, body.get('error', {}).get('code')), (3, 'account_unknown'))
+        self.assertFalse(self.creds.exists())
+        self.assertTrue(any(path == '/api/v1/logout' for path, _ in Server.calls))
 
     def test_notification_delete_does_not_replay_after_refresh_or_revocation(self):
         Server.jwt_mode = True
