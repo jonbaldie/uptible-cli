@@ -51,38 +51,41 @@ def request(url, form=None, bearer=None, method=None, _retry=True, payload=None,
         data = urllib.parse.urlencode(form).encode() if form is not None else None
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with OPENER.open(req, timeout=15) as response:
-            if expected_status is not None and response.status != expected_status:
-                raise Failure("unexpected_response", "Server returned an unexpected response.", 3)
-            return json.load(response) if response.status != 204 else None
-    except urllib.error.HTTPError as exc:
-        if _retry and form is None and method is None and exc.code in (429, 503):
-            retry_after = exc.headers.get("Retry-After", "0")
-            if retry_after.isdigit() and int(retry_after) <= 2:
-                time.sleep(int(retry_after))
-                return request(url, bearer=bearer, _retry=False)
-        code = "http_error"
-        fields = []
         try:
-            payload = json.load(exc)
-            if isinstance(payload, dict) and isinstance(payload.get("error"), str) and payload["error"] in SERVER_ERRORS:
-                code = payload["error"]
-            if exc.code == 422 and isinstance(payload, dict) and isinstance(payload.get("errors"), dict):
-                allowed = {"message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions", "revision"}
-                fields = sorted(allowed.intersection(payload["errors"]))
-        except (ValueError, OSError, http.client.HTTPException, RecursionError):
-            pass
-        message = f"Server rejected request (HTTP {exc.code})."
-        if fields:
-            message += " Check these fields: " + ", ".join(fields) + "."
-        if exc.code == 403:
-            message += " Check lifetime access and permissions for this connection."
-        elif exc.code == 409:
-            message += " Check the request identity or current revision before retrying."
-        failure = Failure(code, message, 3)
-        failure.http_status = exc.code
-        raise failure from None
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError, http.client.HTTPException, RecursionError):
+            with OPENER.open(req, timeout=15) as response:
+                if expected_status is not None and response.status != expected_status:
+                    raise Failure("unexpected_response", "Server returned an unexpected response.", 3)
+                return json.load(response) if response.status != 204 else None
+        except urllib.error.HTTPError as exc:
+            if _retry and form is None and method is None and exc.code in (429, 503):
+                retry_after = exc.headers.get("Retry-After", "0")
+                if retry_after.isdigit() and int(retry_after) <= 2:
+                    time.sleep(int(retry_after))
+                    return request(url, bearer=bearer, _retry=False)
+            code = "http_error"
+            fields = []
+            try:
+                payload = json.load(exc)
+                if isinstance(payload, dict) and isinstance(payload.get("error"), str) and payload["error"] in SERVER_ERRORS:
+                    code = payload["error"]
+                if exc.code == 422 and isinstance(payload, dict) and isinstance(payload.get("errors"), dict):
+                    allowed = {"message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions", "revision"}
+                    fields = sorted(allowed.intersection(payload["errors"]))
+            except (ValueError, OSError, http.client.HTTPException, RecursionError):
+                pass
+            message = f"Server rejected request (HTTP {exc.code})."
+            if fields:
+                message += " Check these fields: " + ", ".join(fields) + "."
+            if exc.code == 403:
+                message += " Check lifetime access and permissions for this connection."
+            elif exc.code == 409:
+                message += " Check the request identity or current revision before retrying."
+            failure = Failure(code, message, 3)
+            failure.http_status = exc.code
+            raise failure from None
+    except Failure:
+        raise
+    except (Exception, KeyboardInterrupt):
         raise Failure("network_error", "Server request failed or returned invalid JSON.", 3) from None
 
 def issuer_url(value):
