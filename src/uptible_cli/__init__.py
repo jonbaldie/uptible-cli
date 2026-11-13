@@ -225,7 +225,7 @@ def granted_scopes(access):
         if not isinstance(scopes, list) or not scopes or any(not isinstance(scope, str) or not scope for scope in scopes):
             raise ValueError()
         return set(scopes)
-    except (IndexError, ValueError, TypeError, KeyError):
+    except Exception:
         raise Failure("scope_unknown", "Cannot determine existing permissions. The connection remains unchanged.", 3) from None
 
 def account_id(account):
@@ -240,7 +240,7 @@ def token_subject(access):
         if not isinstance(subject, str) or not subject.isascii() or not subject.isdecimal() or int(subject) < 1:
             raise ValueError()
         return int(subject)
-    except (IndexError, ValueError, TypeError, KeyError):
+    except Exception:
         raise Failure("account_unknown", "Cannot verify the connected account. The connection remains unchanged.", 3) from None
 
 def refresh_connection(issuer, client, store, original, scopes=None):
