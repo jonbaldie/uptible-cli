@@ -1298,6 +1298,8 @@ urllib.request.urlopen(url, timeout=5).read()
             retry, retry_body = self.run_cli(*command)
             self.assertEqual(retry_body['error']['code'], code)
             self.assertEqual(self.recovery_commands(retry_body['error']['message']), first_commands)
+            if command == ('auth', 'login'):
+                self.assertNotIn('Use auth login --add', retry_body['error']['message'])
         self.assertEqual(self.creds.read_bytes(), before)
         self.assertEqual(Server.refreshes, 0)
         self.follow_recovery(first_message)
