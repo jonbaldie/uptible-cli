@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add explicitly consented account email requests and browser recipient-confirmation guidance.
+- Add fixed browser handoffs for settings, security, onboarding, preview, installation and lifetime billing, with unverified account and completion state.
+- Add an opt-in disposable test-account journey and capability reference.
+
+
 - Add a tag-triggered GitHub release with verified distributions and a rendered Homebrew formula.
 
 - Add lead browsing and explicitly authorized permanent deletion.

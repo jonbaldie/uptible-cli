@@ -121,8 +121,16 @@ def request(url, form=None, bearer=None, method=None, _retry=True, payload=None,
         raise Failure("network_error", "Server request failed or returned invalid JSON.", 3) from None
 
 def issuer_url(value):
-    u = urllib.parse.urlsplit(value)
-    if not u.hostname or u.username or u.password or u.query or u.fragment or u.path not in ("", "/") or not (u.scheme == "https" or (u.scheme == "http" and u.hostname == "127.0.0.1")):
+    try:
+        u = urllib.parse.urlsplit(value)
+        port = u.port
+        valid = (u.hostname and not u.username and not u.password and not u.query and not u.fragment
+                 and u.path in ("", "/") and not any(ord(c) <= 32 or c == "\\" for c in value)
+                 and (port is None or 1 <= port <= 65535)
+                 and (u.scheme == "https" or (u.scheme == "http" and u.hostname == "127.0.0.1")))
+    except ValueError:
+        valid = False
+    if not valid:
         raise Failure("invalid_issuer", "Issuer must be an HTTPS origin or an IPv4 loopback HTTP origin.", 2)
     return value.rstrip("/")
 
@@ -195,7 +203,7 @@ class Store:
         elif self.load():
             self.keyring.delete_password("uptible-cli", self.identity)
 
-def authorize(issuer, client, browser, timeout, delete_leads=False, events=False, billing=False, delete_notifications=False, scopes=None):
+def authorize(issuer, client, browser, timeout, delete_leads=False, events=False, billing=False, delete_notifications=False, scopes=None, email_change=False):
     state = secrets.token_urlsafe(32)
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
@@ -227,7 +235,7 @@ def authorize(issuer, client, browser, timeout, delete_leads=False, events=False
     with HTTPServer(("127.0.0.1", 0), Handler) as server:
         server.timeout = 0.25
         callback = f"http://127.0.0.1:{server.server_port}/callback"
-        query = urllib.parse.urlencode({"response_type":"code", "client_id":client, "redirect_uri":callback, "scope":scopes or ("account:read notifications:read notifications:write installation:read activity:read leads:read statistics:read" + (" leads:delete" if delete_leads else "") + (" events:write" if events else "") + (" billing:read" if billing else "") + (" notifications:delete" if delete_notifications else "")), "state":state, "code_challenge":challenge, "code_challenge_method":"S256"})
+        query = urllib.parse.urlencode({"response_type":"code", "client_id":client, "redirect_uri":callback, "scope":scopes or ("account:read notifications:read notifications:write installation:read activity:read leads:read statistics:read" + (" leads:delete" if delete_leads else "") + (" events:write" if events else "") + (" billing:read" if billing else "") + (" notifications:delete" if delete_notifications else "") + (" account:email:write" if email_change else "")), "state":state, "code_challenge":challenge, "code_challenge_method":"S256"})
         url = issuer + "/oauth/authorize?" + query
         def launch():
             try:
@@ -319,7 +327,7 @@ def refresh_connection(issuer, client, store, original, recovery, scopes=None):
     return refreshed, account
 
 def upgrade(args, issuer, store, original, recovery):
-    additions = {scope for selected, scope in ((args.delete_leads, "leads:delete"), (args.events, "events:write"), (args.billing, "billing:read"), (args.delete_notifications, "notifications:delete")) if selected}
+    additions = {scope for selected, scope in ((args.delete_leads, "leads:delete"), (args.events, "events:write"), (args.billing, "billing:read"), (args.delete_notifications, "notifications:delete"), (args.email_change, "account:email:write")) if selected}
     if original.get("refresh_pending"):
         raise Failure("refresh_uncertain", "The existing refresh outcome is unknown. " + recovery, 3)
     if not additions:
@@ -417,7 +425,7 @@ def run(args):
                 if not token:
                     raise Failure("not_connected", "No saved connection. Run auth login first.")
                 return upgrade(args, issuer, store, token, recovery)
-            token = authorize(issuer, args.client_id, args.browser_driver, args.callback_timeout, args.delete_leads, args.events, args.billing, args.delete_notifications)
+            token = authorize(issuer, args.client_id, args.browser_driver, args.callback_timeout, args.delete_leads, args.events, args.billing, args.delete_notifications, email_change=args.email_change)
             try:
                 validated = store.validate(token)
                 account = request(issuer + "/api/v1/account", bearer=validated["access_token"])
@@ -457,6 +465,8 @@ def run(args):
                 if getattr(exc, "http_status", None) == 401:
                     token, _ = refresh_connection(issuer, args.client_id, store, token, recovery)
                     if kwargs.get("method"):
+                        if args.command == "account" and args.action == "update":
+                            raise exc.reframe("operation_not_retried", "The connection was refreshed. The email request was not retried. Check the recipient mailbox and account settings before requesting another code.") from None
                         if args.command == "notifications" and args.action == "delete":
                             raise exc.reframe("operation_not_retried", "The connection was refreshed. The deletion was not retried. Check the notification before deciding whether to retry.") from None
                         raise exc.reframe("operation_not_retried", "The connection was refreshed. The write was not retried. For event submissions, retry the exact command with the same IDs and payload. For create, reuse the same key and input.") from None
@@ -469,6 +479,25 @@ def run(args):
                 if (exc.code == "network_error" or getattr(exc, "http_status", 0) >= 500) and args.command == "events":
                     raise exc.reframe("event_uncertain", "The event outcome is unknown. Retry the exact command with the same IDs and payload.") from None
                 raise
+        if (args.command, args.action) in BROWSER_ACTIONS:
+            account = authenticated(issuer + "/api/v1/account")
+            connected_id = account_id(account)
+            if args.command == "notifications":
+                authenticated(issuer + "/api/v1/notifications/" + str(args.id))
+            return browser_handoff(args, issuer, connected_id)
+        if args.command == "account" and args.action == "update":
+            try:
+                result = authenticated(issuer + "/api/v1/account/email-change", method="POST",
+                                       payload={"email": args.email}, expected_status=202)
+                if result != {"status": "confirmation_required"}:
+                    raise Failure("unexpected_response", "Server returned an unexpected response.", 3)
+            except Failure as exc:
+                if exc.code in ("network_error", "unexpected_response") or exc.http_status >= 500:
+                    raise exc.reframe("email_change_uncertain", "The request outcome is unknown. Check the recipient mailbox and account settings before requesting another code. The account email has not been confirmed by this command.") from None
+                raise
+            return {"status": "confirmation_required", "email_changed": False,
+                    "confirmation_url": issuer + "/billing",
+                    "next_step": "Run account confirm-email to open account settings. Check the browser account, then enter the recipient code and current password in the Confirm email change form. Run account show afterwards to read the authoritative identity."}
         if args.command == "events":
             payload = {"session_id": args.session_id, "event_id": args.event_id}
             if args.action == "capture":
@@ -520,6 +549,40 @@ def run(args):
             return authenticated(path, method="PUT", payload=payload)
         return authenticated(path + "/" + args.action, method="PUT", payload={})
 
+BROWSER_ACTIONS = {
+    ("account", "settings"): ("/billing", "Review account settings and connected clients."),
+    ("account", "security"): ("/billing", "Use the password, connection revocation, Google linking or account closure form. Closure requires current password confirmation and cannot be undone by the CLI."),
+    ("account", "onboarding"): ("/onboarding", "Review onboarding and lifetime access options."),
+    ("account", "confirm-email"): ("/billing", "Enter the recipient code and current password in the Confirm email change form. Invalid, expired, replaced or used codes do not change identity. Run account show afterwards."),
+    ("notifications", "preview"): ("/notifications", "Find the requested notification, using page navigation if needed, then select Preview. This command does not open its modal or confirm rendering."),
+    ("installation", "open"): ("/install", "Review installation instructions and tracking status."),
+    ("billing", "checkout"): ("/billing", "Review the single $99 lifetime offer and confirm checkout in the browser. Opening this page does not purchase access. Return to billing status to check server access."),
+    ("billing", "open"): ("/billing", "Review billing history, payment reconciliation or purchase claims. Complete any required confirmations in the browser."),
+}
+
+
+def browser_handoff(args, issuer, connected_id):
+    path, instruction = BROWSER_ACTIONS[(args.command, args.action)]
+    url = issuer + path
+    try:
+        if args.browser_driver:
+            subprocess.Popen([args.browser_driver, url], close_fds=True)
+        elif not webbrowser.open(url):
+            raise OSError()
+    except OSError:
+        raise Failure("browser_failed", "Could not open a browser. Set a default browser and retry. No browser action was confirmed.") from None
+    result = {"browser_launch_requested": True, "url": url, "completed": False,
+              "account_binding_verified": False, "connected_account_id": connected_id,
+              "next_step": "The browser has its own session. Compare its signed-in identity with account show before submitting a form. " + instruction}
+    if args.command == "notifications":
+        result["notification_id"] = args.id
+    return result
+
+
+def browser_option(parser):
+    parser.add_argument("--browser-driver", help="executable that receives the fixed browser URL")
+
+
 def notification_payload(args):
     return {name: getattr(args, name) for name in ("message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions") if getattr(args, name) is not None}
 
@@ -563,6 +626,7 @@ def build_parser():
     login.add_argument("--delete-leads", action="store_true", help="request permission to permanently delete leads during browser consent")
     login.add_argument("--delete-notifications", action="store_true", help="request permission to permanently delete notifications during browser consent")
     login.add_argument("--events", action="store_true", help="request permission to submit events")
+    login.add_argument("--email-change", action="store_true", help="request email change permission with current-password proof in browser consent")
     login.add_argument("--billing", action="store_true", help="request permission to read billing")
     login.add_argument("--browser-driver", help="executable that receives the authorization URL")
     login.add_argument("--callback-timeout", type=int, default=120)
@@ -571,10 +635,15 @@ def build_parser():
     logout.add_argument("--local", action="store_true", help="forget locally without revoking the server grant")
     account = sub.add_parser("account").add_subparsers(dest="action", required=True)
     account.add_parser("show")
+    update = account.add_parser("update", description="Request an email change. HTTP 202 means recipient confirmation is required, not that the email changed. Add permission with auth login --add --email-change. Password and recipient code stay in the browser.")
+    update.add_argument("--email", required=True, help="new recipient email address")
+    for action in ("settings", "security", "onboarding", "confirm-email"):
+        browser_option(account.add_parser(action, description="Open the corresponding browser form. Verify the browser account before acting. The CLI cannot confirm browser identity or completion."))
     stats = sub.add_parser("stats", help="show dashboard statistics").add_subparsers(dest="action", required=True)
     stats.add_parser("show", description="Show lifetime customer dashboard statistics. Capture counts use active, non-archived owned notifications. Hour and day counts cover the preceding hour and 24 hours in inclusive rolling UTC windows ending at as_of. Tracks include all account history. Results may be cached for one second.")
     installation = sub.add_parser("installation").add_subparsers(dest="action", required=True)
     installation.add_parser("show")
+    browser_option(installation.add_parser("open", help="open browser installation instructions"))
     leads = sub.add_parser("leads", help="browse or permanently delete collected leads").add_subparsers(dest="action", required=True)
     lead_list = leads.add_parser("list", description="List one page, including leads from inactive and archived notifications. Dates are UTC; --from is inclusive and --until is exclusive. Pass next_cursor as --cursor with the same filters.")
     lead_list.add_argument("--limit", type=positive, default=20, choices=range(1, 101), metavar="1-100")
@@ -600,6 +669,8 @@ def build_parser():
     status = billing.add_parser("status", description="Read billing status. Purchase eligibility does not guarantee checkout availability.")
     status.add_argument("--cursor", help="next_cursor for older orders")
     status.add_argument("--claim-cursor", help="next_claim_cursor for older purchase references")
+    for action in ("checkout", "open"):
+        browser_option(billing.add_parser(action, description="Open billing in the browser. Check the browser account, then complete any checkout or payment confirmation there. Opening a page does not confirm payment."))
     notifications = sub.add_parser("notifications", help="manage notifications").add_subparsers(dest="action", required=True)
     listing = notifications.add_parser("list")
     listing.add_argument("--limit", type=positive, default=20, choices=range(1, 101), metavar="1-100")
@@ -614,6 +685,9 @@ def build_parser():
     for action in ("show", "activity", "activate", "deactivate", "archive", "restore"):
         command = notifications.add_parser(action)
         command.add_argument("id", type=positive)
+    preview = notifications.add_parser("preview", description="Check the owned notification, then open the browser notification list. Find the notification and select Preview. Browser account and rendering are not verified.")
+    preview.add_argument("id", type=positive)
+    browser_option(preview)
     delete = notifications.add_parser("delete", help="permanently delete a notification and its collected leads", description="Permanently delete one notification and its collected leads. This cannot be undone. Request permission with auth login --delete-notifications or auth login --add --delete-notifications. If the outcome is unknown, check the notification before retrying.")
     delete.add_argument("id", type=positive)
     delete.add_argument("--yes", action="store_true", help="confirm permanent deletion without prompting")

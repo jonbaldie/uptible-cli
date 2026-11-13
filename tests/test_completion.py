@@ -24,7 +24,11 @@ class CompletionTests(unittest.TestCase):
 
     def test_current_commands_and_options(self):
         self.assertEqual(self.complete(''), ['account', 'auth', 'billing', 'completion', 'events', 'installation', 'leads', 'notifications', 'stats'])
-        self.assertEqual(self.complete('notifications', ''), ['activate', 'activity', 'archive', 'create', 'deactivate', 'delete', 'edit', 'list', 'restore', 'show'])
+        self.assertEqual(self.complete('notifications', ''), ['activate', 'activity', 'archive', 'create', 'deactivate', 'delete', 'edit', 'list', 'preview', 'restore', 'show'])
+        self.assertEqual(self.complete('account', 'update', '--e'), ['--email'])
+        self.assertEqual(self.complete('auth', 'login', '--email'), ['--email-change'])
+        self.assertEqual(self.complete('billing', 'ch'), ['checkout'])
+        self.assertEqual(self.complete('notifications', 'pre'), ['preview'])
         self.assertEqual(self.complete('auth', ''), ['login', 'logout', 'status'])
         self.assertIn('--delete-notifications', self.complete('auth', 'login', '--delete'))
         self.assertEqual(self.complete('events', 'capture', '--e'), ['--email', '--event-id'])
@@ -32,7 +36,7 @@ class CompletionTests(unittest.TestCase):
         self.assertEqual(self.complete('notifications', 'edit', '12', '--no-'), ['--no-display-maps-only'])
         self.assertEqual(self.complete('--j', 'leads', 'delete', '12', '--y'), ['--yes'])
         self.assertEqual(self.complete('--profile=synthetic', 'stats', ''), ['show'])
-        self.assertEqual(self.complete('--issuer', 'https://example.invalid', '--client-id', 'synthetic', 'account', ''), ['show'])
+        self.assertEqual(self.complete('--issuer', 'https://example.invalid', '--client-id', 'synthetic', 'account', ''), ['confirm-email', 'onboarding', 'security', 'settings', 'show', 'update'])
         self.assertEqual(self.complete('auth', 'login', '--issuer'), [])
         self.assertEqual(self.complete('completion', ''), ['bash', 'zsh'])
         self.assertEqual(self.complete('-'), ['--client-id', '--credential-file', '--help', '--issuer', '--json', '--profile', '--version', '-h'])
@@ -104,7 +108,12 @@ class CompletionTests(unittest.TestCase):
                 self.assertEqual(out.getvalue(), '')
 
     def test_real_shell_adapters(self):
-        cases = [(['uptible', 'no'], ['notifications']),
+        cases = [(['uptible', 'account', 'up'], ['update']),
+                 (['uptible', 'account', 'update', '--e'], ['--email']),
+                 (['uptible', 'auth', 'login', '--email'], ['--email-change']),
+                 (['uptible', 'billing', 'ch'], ['checkout']),
+                 (['uptible', 'notifications', 'pre'], ['preview']),
+                 (['uptible', 'no'], ['notifications']),
                  (['uptible', 'auth', 'lo'], ['login', 'logout']),
                  (['uptible', 'notifications', 'edit', '12', '--no-'], ['--no-display-maps-only']),
                  (['uptible', 'events', 'capture', '1', '--e'], ['--email', '--event-id']),
