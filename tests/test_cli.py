@@ -37,6 +37,7 @@ class Server(BaseHTTPRequestHandler):
     account_error = None
     refreshes = 0
     reject_logout = False
+    logout_error = None
     drop_refresh_response = False
     login_response = None
     jwt_mode = False
@@ -227,7 +228,9 @@ class Server(BaseHTTPRequestHandler):
             self.respond({'access_token': access, 'refresh_token': self.current_refresh, 'expires_in': 60})
         elif self.path == '/api/v1/logout':
             self.logout_bearers.append(self.headers.get('Authorization'))
-            if self.reject_logout:
+            if self.logout_error:
+                self.respond(self.logout_error[1], self.logout_error[0])
+            elif self.reject_logout:
                 self.respond({'error': 'synthetic-secret-marker'}, 503)
             else:
                 self.send_response(204)
@@ -331,7 +334,8 @@ class Server(BaseHTTPRequestHandler):
             type(self).authorization = urllib.parse.parse_qs(parsed.query)
             self.respond({'ok': True})
         elif self.path == '/api/v1/account' and self.account_error is not None:
-            self.respond({'error': self.account_error}, 503)
+            status, body = self.account_error if isinstance(self.account_error, tuple) else (503, {'error': self.account_error})
+            self.respond(body, status)
         elif self.path == '/api/v1/account' and self.account_payload is not None:
             self.respond(self.account_payload)
         elif self.path == '/api/v1/account' and self.headers.get('Authorization', '').startswith('Bearer '):
@@ -374,6 +378,7 @@ class CLI(unittest.TestCase):
         Server.current_refresh = "first"
         Server.refreshes = 0
         Server.reject_logout = False
+        Server.logout_error = None
         Server.drop_refresh_response = False
         Server.calls = []
         Server.operations = []
@@ -1668,6 +1673,69 @@ urllib.request.urlopen(url, timeout=5).read()
                     self.assertEqual((error['http_status'], error['server_code'], error['correlation_id']), (status, server_code, correlation))
                     self.assertEqual(Server.rejections, [(method, path, status)])
                     self.assertNotIn('synthetic-secret-marker', result.stderr)
+
+    def test_problem_context_survives_failed_login_cleanup(self):
+        Server.jwt_mode = True
+        earlier = '481e2370-b81f-4b8d-b02f-ad00f08c8444'
+        cleanup = '481e2370-b81f-4b8d-b02f-ad00f08c8445'
+        Server.account_error = (422, {'code': 'validation_error', 'correlation_id': earlier,
+                                      'errors': {'message': ['synthetic-secret-marker']}})
+        Server.logout_error = (503, {'code': 'upstream_unavailable', 'correlation_id': cleanup,
+                                     'detail': 'synthetic-secret-marker'})
+        Server.api_headers = {'Retry-After': '0'}
+        result, body = self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
+        error = body['error']
+        self.assertEqual((result.returncode, error['code'], error['http_status'], error['server_code'], error['correlation_id']),
+                         (3, 'cleanup_unconfirmed', 503, 'upstream_unavailable', cleanup))
+        self.assertIn('Login failed and grant revocation could not be confirmed', error['message'])
+        self.assertNotIn('fields', error)
+        self.assertNotIn(earlier, result.stderr)
+        self.assertFalse(self.creds.exists())
+        self.assertEqual(Server.logout_bearers, ['Bearer ' + Server.issued_access])
+        self.assertEqual(Server.rejections.count(('POST', '/api/v1/logout', 503)), 1)
+        for secret in ('synthetic-secret-marker', Server.issued_access, Server.current_refresh):
+            self.assertNotIn(secret, result.stdout + result.stderr)
+
+    def test_problem_context_survives_failed_new_grant_cleanup(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        before = self.creds.read_bytes()
+        correlation = '481e2370-b81f-4b8d-b02f-ad00f08c8444'
+        Server.account_number = 43
+        Server.logout_error = (503, {'code': 'upstream_unavailable', 'correlation_id': correlation,
+                                     'detail': 'synthetic-secret-marker'})
+        Server.api_headers = {'Retry-After': '0'}
+        result, body = self.run_cli('auth', 'login', '--add', '--events', '--browser-driver', str(self.driver))
+        error = body['error']
+        self.assertEqual((result.returncode, error['code'], error['http_status'], error['server_code'], error['correlation_id']),
+                         (3, 'cleanup_unconfirmed', 503, 'upstream_unavailable', correlation))
+        self.assertIn('existing connection was retained', error['message'])
+        self.assertEqual(self.creds.read_bytes(), before)
+        self.assertEqual(Server.logout_bearers, ['Bearer ' + Server.issued_access])
+        self.assertEqual(Server.rejections, [('POST', '/api/v1/logout', 503)])
+        for secret in ('synthetic-secret-marker', Server.issued_access, json.loads(before)['access_token'], Server.current_refresh):
+            self.assertNotIn(secret, result.stdout + result.stderr)
+
+    def test_problem_context_survives_failed_old_grant_cleanup(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        before = self.creds.read_bytes()
+        correlation = '481e2370-b81f-4b8d-b02f-ad00f08c8444'
+        Server.logout_error = (503, {'code': 'upstream_unavailable', 'correlation_id': correlation,
+                                     'detail': 'synthetic-secret-marker'})
+        Server.api_headers = {'Retry-After': '0'}
+        result, body = self.run_cli('auth', 'login', '--add', '--events', '--browser-driver', str(self.driver))
+        error = body['error']
+        self.assertEqual((result.returncode, error['code'], error['http_status'], error['server_code'], error['correlation_id']),
+                         (3, 'cleanup_unconfirmed', 503, 'upstream_unavailable', correlation))
+        self.assertIn('new connection was saved', error['message'])
+        self.assertNotEqual(self.creds.read_bytes(), before)
+        self.assertEqual(json.loads(self.creds.read_bytes())['access_token'], Server.issued_access)
+        self.assertEqual(Server.logout_bearers, ['Bearer ' + json.loads(before)['access_token']])
+        self.assertEqual(Server.rejections, [('POST', '/api/v1/logout', 503)])
+        self.assertEqual(self.run_cli('auth', 'status')[1]['account']['id'], 42)
+        for secret in ('synthetic-secret-marker', Server.issued_access, json.loads(before)['access_token'], Server.current_refresh):
+            self.assertNotIn(secret, result.stdout + result.stderr)
 
     def test_problem_retry_after_keeps_existing_get_contract(self):
         self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
