@@ -24,6 +24,8 @@ class Server(BaseHTTPRequestHandler):
     login_response = None
     jwt_mode = False
     issued_scopes = None
+    refresh_scopes = None
+    refresh_account = None
     account_number = 42
     grant_number = 0
     current_refresh = "first"
@@ -31,6 +33,8 @@ class Server(BaseHTTPRequestHandler):
     reject_next = False
     drop_create = False
     api_error = None
+    notification_records = None
+    delete_success_status = 204
     event_receipt = {'receipt': 'synthetic-receipt', 'status': 'processed'}
     statistics = {'hour_captures_count': 1, 'captures_count': 2, 'all_captures_count': 3, 'tracks_count': 4, 'as_of': '2026-01-02T00:00:00Z', 'hour_start': '2026-01-01T23:00:00Z', 'day_start': '2026-01-01T00:00:00Z'}
     def log_message(self, *args):
@@ -115,8 +119,11 @@ class Server(BaseHTTPRequestHandler):
             if self.jwt_mode:
                 if form.get('grant_type') == ['authorization_code']:
                     type(self).grant_number += 1
-                scopes = self.issued_scopes if self.issued_scopes is not None else self.authorization['scope'][0].split()
-                claims = {'scopes': scopes, 'account': self.account_number, 'grant': self.grant_number}
+                refreshing = form.get('grant_type') == ['refresh_token']
+                scopes = self.refresh_scopes if refreshing and self.refresh_scopes is not None else self.issued_scopes
+                scopes = scopes if scopes is not None else self.authorization['scope'][0].split()
+                account = self.refresh_account if refreshing and self.refresh_account is not None else self.account_number
+                claims = {'scopes': scopes, 'account': account, 'sub': str(account), 'grant': self.grant_number}
                 access = 'header.' + base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=') + '.signature'
             self.respond({'access_token': access, 'refresh_token': self.current_refresh, 'expires_in': 60})
         elif self.path == '/api/v1/logout' and self.reject_logout:
@@ -133,8 +140,40 @@ class Server(BaseHTTPRequestHandler):
             self.respond({'error': 'conflict'}, 409)
         else:
             self.respond({'id': 7, 'revision': 3})
+    def claims(self):
+        access = self.headers['Authorization'].removeprefix('Bearer ')
+        part = access.split('.')[1]
+        return json.loads(base64.urlsafe_b64decode(part + '=' * (-len(part) % 4)))
     def do_DELETE(self):
         self.operations.append(('DELETE', self.path))
+        if self.notification_records is not None and self.path.startswith('/api/v1/notifications/'):
+            if self.reject_next:
+                type(self).reject_next = False
+                self.respond({}, 401)
+                return
+            if self.api_error:
+                self.respond(self.api_error[1], self.api_error[0])
+                return
+            claims = self.claims()
+            if 'notifications:delete' not in claims['scopes']:
+                self.respond({}, 403)
+                return
+            identifier = int(self.path.rsplit('/', 1)[-1])
+            record = self.notification_records.get(identifier)
+            if record is None or record['owner'] != claims['account']:
+                self.respond({}, 404)
+                return
+            if self.delete_success_status != 204:
+                self.respond({'status': 'accepted'}, self.delete_success_status)
+                return
+            del self.notification_records[identifier]
+            if self.drop_create:
+                self.connection.shutdown(2)
+                self.connection.close()
+            else:
+                self.send_response(204)
+                self.end_headers()
+            return
         if self.drop_create:
             self.connection.shutdown(2)
             self.connection.close()
@@ -165,6 +204,14 @@ class Server(BaseHTTPRequestHandler):
                 self.respond(self.api_error[1], self.api_error[0])
             else:
                 self.respond(self.statistics)
+            return
+        if self.notification_records is not None and self.path.startswith('/api/v1/notifications/') and self.path.rsplit('/', 1)[-1].isdigit():
+            self.operations.append(('GET', self.path))
+            record = self.notification_records.get(int(self.path.rsplit('/', 1)[-1]))
+            if record is None or record['owner'] != self.claims()['account']:
+                self.respond({}, 404)
+            else:
+                self.respond(record)
             return
         if self.path.startswith(('/api/v1/notifications', '/api/v1/leads')) or self.path == '/api/v1/installation':
             self.operations.append(('GET', self.path))
@@ -204,6 +251,8 @@ class CLI(unittest.TestCase):
         Server.login_response = None
         Server.jwt_mode = False
         Server.issued_scopes = None
+        Server.refresh_scopes = None
+        Server.refresh_account = None
         Server.account_number = 42
         Server.grant_number = 0
         Server.authorization = None
@@ -218,6 +267,8 @@ class CLI(unittest.TestCase):
         Server.reject_next = False
         Server.drop_create = False
         Server.api_error = None
+        Server.notification_records = None
+        Server.delete_success_status = 204
         Server.event_receipt = {'receipt': 'synthetic-receipt', 'status': 'processed'}
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -304,6 +355,78 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(set(Server.authorization['scope'][0].split()), requested)
         self.assertNotEqual(self.creds.read_text(), original)
         self.assertEqual(self.run_cli('auth', 'status')[1]['account']['id'], 42)
+
+    def test_notification_delete_denied_upgrade_after_refresh_retains_grant(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--events', '--browser-driver', str(self.driver))[0].returncode, 0)
+        old_scopes = set(Server.authorization['scope'][0].split())
+        saved = json.loads(self.creds.read_text())
+        saved['expires_at'] = 0
+        self.creds.write_text(json.dumps(saved))
+        result, body = self.run_cli('auth', 'login', '--add', '--delete-notifications', '--browser-driver', str(self.driver), env=dict(os.environ, DENY='1'))
+        self.assertEqual((result.returncode, body['error']['code']), (1, 'authorization_denied'))
+        self.assertEqual(Server.refreshes, 1)
+        self.assertEqual(self.run_cli('auth', 'status')[1]['account']['id'], 42)
+        rotated = json.loads(self.creds.read_text())
+        self.assertEqual(rotated['refresh_token'], 'rotated')
+        part = rotated['access_token'].split('.')[1]
+        claims = json.loads(base64.urlsafe_b64decode(part + '=' * (-len(part) % 4)))
+        self.assertEqual(set(claims['scopes']), old_scopes)
+
+    def test_notification_delete_upgrade_rejects_changed_refresh_scopes(self):
+        Server.jwt_mode = True
+        for change in ('narrow', 'expand'):
+            Server.refresh_scopes = None
+            Server.current_refresh = 'first'
+            self.assertEqual(self.run_cli('auth', 'login', '--events', '--browser-driver', str(self.driver))[0].returncode, 0)
+            old_scopes = set(Server.authorization['scope'][0].split())
+            saved = json.loads(self.creds.read_text())
+            saved['expires_at'] = 0
+            self.creds.write_text(json.dumps(saved))
+            Server.refresh_scopes = sorted(old_scopes - {'events:write'} if change == 'narrow' else old_scopes | {'billing:read'})
+            result, body = self.run_cli('auth', 'login', '--add', '--delete-notifications', '--browser-driver', str(self.driver))
+            self.assertEqual(result.returncode, 3, body)
+            self.assertEqual(body['error']['code'], 'refresh_permissions_changed')
+            self.assertIn('reconnect', body['error']['message'])
+            self.assertEqual(set(Server.authorization['scope'][0].split()), old_scopes)
+            pending = json.loads(self.creds.read_text())
+            self.assertEqual(pending['access_token'], saved['access_token'])
+            self.assertTrue(pending['refresh_pending'])
+            self.assertEqual(self.run_cli('auth', 'logout', '--local')[0].returncode, 0)
+
+    def test_notification_delete_upgrade_rejects_account_change_during_refresh(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        old_scopes = set(Server.authorization['scope'][0].split())
+        saved = json.loads(self.creds.read_text())
+        saved['expires_at'] = 0
+        self.creds.write_text(json.dumps(saved))
+        Server.refresh_account = 43
+        result, body = self.run_cli('auth', 'login', '--add', '--delete-notifications', '--browser-driver', str(self.driver))
+        self.assertEqual(result.returncode, 3, body)
+        self.assertEqual(body['error']['code'], 'refresh_account_changed')
+        self.assertIn('reconnect', body['error']['message'])
+        self.assertEqual(set(Server.authorization['scope'][0].split()), old_scopes)
+        pending = json.loads(self.creds.read_text())
+        self.assertEqual(pending['access_token'], saved['access_token'])
+        self.assertTrue(pending['refresh_pending'])
+
+    def test_notification_delete_upgrade_requires_known_expired_account(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        saved = json.loads(self.creds.read_text())
+        part = saved['access_token'].split('.')[1]
+        claims = json.loads(base64.urlsafe_b64decode(part + '=' * (-len(part) % 4)))
+        del claims['sub']
+        encoded = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
+        saved['access_token'] = 'header.' + encoded + '.signature'
+        saved['expires_at'] = 0
+        self.creds.write_text(json.dumps(saved))
+        before = self.creds.read_text()
+        result, body = self.run_cli('auth', 'login', '--add', '--delete-notifications', '--browser-driver', str(self.driver))
+        self.assertEqual((result.returncode, body['error']['code']), (3, 'account_unknown'))
+        self.assertEqual(Server.refreshes, 0)
+        self.assertEqual(self.creds.read_text(), before)
 
     def test_permission_upgrade_retains_scope_and_rejects_other_account(self):
         Server.jwt_mode = True
@@ -517,6 +640,98 @@ urllib.request.urlopen(url, timeout=5).read()
         result = subprocess.run(self.base + ['notifications', 'delete', '7', '--yes'], capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), {'deleted': True, 'id': 7})
+        self.assertEqual(Server.operations, [('DELETE', '/api/v1/notifications/7')])
+
+    def test_notification_delete_rejects_invalid_ids_before_connection(self):
+        unavailable = self.path / 'untouched' / 'credentials'
+        base = self.base.copy()
+        base[base.index(str(self.creds))] = str(unavailable)
+        for identifier in ('0', '-1', 'not-an-id', '7/other'):
+            result = subprocess.run(base + ['notifications', 'delete', identifier, '--yes'], capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertEqual(result.stdout, '')
+        self.assertFalse(unavailable.parent.exists())
+        self.assertEqual(Server.calls, [])
+        self.assertEqual(Server.operations, [])
+
+    def test_notification_delete_checks_scope_owner_and_archived_record(self):
+        Server.jwt_mode = True
+        Server.notification_records = {7: {'owner': 42, 'state': 'archived'}, 8: {'owner': 43, 'state': 'active'}}
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        result, body = self.run_cli('notifications', 'delete', '7', '--yes')
+        self.assertEqual(result.returncode, 3)
+        self.assertIn('403', body['error']['message'])
+        self.assertEqual(self.run_cli('notifications', 'show', '7')[1]['state'], 'archived')
+        self.assertEqual(self.run_cli('auth', 'login', '--add', '--delete-notifications', '--browser-driver', str(self.driver))[0].returncode, 0)
+        result, body = self.run_cli('notifications', 'delete', '8', '--yes')
+        self.assertEqual(result.returncode, 3)
+        self.assertIn('404', body['error']['message'])
+        code, stdout, stderr, terminal = self.run_tty_cli(self.base, b'yes\n', 'notifications', 'delete', '7')
+        self.assertEqual((code, stderr), (0, ''))
+        self.assertEqual(json.loads(stdout), {'deleted': True, 'id': 7})
+        self.assertIn('collected leads', terminal)
+        self.assertIn('404', self.run_cli('notifications', 'show', '7')[1]['error']['message'])
+        self.assertIn('404', self.run_cli('notifications', 'delete', '7', '--yes')[1]['error']['message'])
+        self.assertEqual(Server.notification_records, {8: {'owner': 43, 'state': 'active'}})
+
+    def test_notification_delete_reports_uncertain_response_without_replay(self):
+        Server.jwt_mode = True
+        Server.notification_records = {7: {'owner': 42}, 8: {'owner': 42}, 9: {'owner': 42}}
+        self.assertEqual(self.run_cli('auth', 'login', '--delete-notifications', '--browser-driver', str(self.driver))[0].returncode, 0)
+        Server.drop_create = True
+        result, body = self.run_cli('notifications', 'delete', '7', '--yes')
+        self.assertEqual((result.returncode, body['error']['code']), (3, 'delete_uncertain'))
+        self.assertIn('Check the notification', body['error']['message'])
+        self.assertEqual(result.stdout, '')
+        self.assertEqual(Server.operations.count(('DELETE', '/api/v1/notifications/7')), 1)
+        self.assertIn('404', self.run_cli('notifications', 'show', '7')[1]['error']['message'])
+        Server.drop_create = False
+        Server.api_error = (503, {'error': 'synthetic-secret-marker'})
+        result, body = self.run_cli('notifications', 'delete', '8', '--yes')
+        self.assertEqual((result.returncode, body['error']['code']), (3, 'delete_uncertain'))
+        self.assertNotIn('synthetic-secret-marker', result.stderr)
+        self.assertEqual(Server.operations.count(('DELETE', '/api/v1/notifications/8')), 1)
+        Server.api_error = (429, {})
+        result, body = self.run_cli('notifications', 'delete', '8', '--yes')
+        self.assertEqual(result.returncode, 3)
+        self.assertIn('429', body['error']['message'])
+        self.assertEqual(Server.operations.count(('DELETE', '/api/v1/notifications/8')), 2)
+        Server.api_error = None
+        Server.delete_success_status = 200
+        result, body = self.run_cli('notifications', 'delete', '9', '--yes')
+        self.assertEqual((result.returncode, body['error']['code']), (3, 'delete_uncertain'))
+        self.assertEqual(result.stdout, '')
+        self.assertEqual(Server.operations.count(('DELETE', '/api/v1/notifications/9')), 1)
+        self.assertEqual(set(Server.notification_records), {8, 9})
+
+    def test_notification_delete_does_not_replay_after_refresh_or_revocation(self):
+        Server.jwt_mode = True
+        Server.notification_records = {7: {'owner': 42}, 8: {'owner': 42}}
+        self.assertEqual(self.run_cli('auth', 'login', '--delete-notifications', '--browser-driver', str(self.driver))[0].returncode, 0)
+        Server.reject_next = True
+        result, body = self.run_cli('notifications', 'delete', '7', '--yes')
+        self.assertEqual((result.returncode, body['error']['code']), (3, 'operation_not_retried'))
+        self.assertIn('notification', body['error']['message'])
+        self.assertIn('not retried', body['error']['message'])
+        self.assertEqual(Server.operations.count(('DELETE', '/api/v1/notifications/7')), 1)
+        self.assertEqual(self.run_cli('notifications', 'show', '7')[1]['owner'], 42)
+        Server.reject_next = True
+        Server.reject_refresh = True
+        result, body = self.run_cli('notifications', 'delete', '8', '--yes')
+        self.assertEqual((result.returncode, body['error']['code']), (3, 'invalid_grant'))
+        self.assertEqual(Server.operations.count(('DELETE', '/api/v1/notifications/8')), 1)
+        result, body = self.run_cli('notifications', 'delete', '8', '--yes')
+        self.assertEqual(body['error']['code'], 'refresh_uncertain')
+        self.assertEqual(Server.operations.count(('DELETE', '/api/v1/notifications/8')), 1)
+        self.assertEqual(set(Server.notification_records), {7, 8})
+
+    def test_notification_delete_human_output_reports_confirmed_result(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--delete-notifications', '--browser-driver', str(self.driver))[0].returncode, 0)
+        base = [value for value in self.base if value != '--json']
+        result = subprocess.run(base + ['notifications', 'delete', '7', '--yes'], capture_output=True, text=True, timeout=10)
+        self.assertEqual((result.returncode, result.stderr), (0, ''))
+        self.assertEqual(json.loads(result.stdout), {'deleted': True, 'id': 7})
+        self.assertIn('\n  "deleted": true', result.stdout)
         self.assertEqual(Server.operations, [('DELETE', '/api/v1/notifications/7')])
 
     def test_notification_commands_and_recovery(self):

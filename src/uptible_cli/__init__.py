@@ -237,19 +237,44 @@ def account_id(account):
         raise Failure("account_unknown", "Cannot verify the connected account.", 3)
     return account["id"]
 
+def token_subject(access):
+    try:
+        encoded = access.split(".")[1]
+        subject = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))["sub"]
+        if not isinstance(subject, str) or not subject.isascii() or not subject.isdecimal() or int(subject) < 1:
+            raise ValueError()
+        return int(subject)
+    except (IndexError, ValueError, TypeError, KeyError):
+        raise Failure("account_unknown", "Cannot verify the connected account. The connection remains unchanged.", 3) from None
+
 def upgrade(args, issuer, store, original):
     additions = {scope for selected, scope in ((args.delete_leads, "leads:delete"), (args.events, "events:write"), (args.billing, "billing:read"), (args.delete_notifications, "notifications:delete")) if selected}
     if not additions:
         raise Failure("permissions_required", "Select at least one permission to add.", 2)
     if original.get("refresh_pending"):
         raise Failure("refresh_uncertain", "The existing refresh outcome is unknown. Recover the connection before adding permissions.", 3)
+    old_scopes = granted_scopes(original["access_token"])
     if time.time() >= original["expires_at"]:
+        old_subject = token_subject(original["access_token"])
         original["refresh_pending"] = True
         store.write(original)
-        original = store.save(request(issuer + "/oauth/token", {"grant_type":"refresh_token", "client_id":args.client_id, "refresh_token":original["refresh_token"]}))
-    old_account = request(issuer + "/api/v1/account", bearer=original["access_token"])
+        refreshed = store.validate(request(issuer + "/oauth/token", {"grant_type":"refresh_token", "client_id":args.client_id, "refresh_token":original["refresh_token"]}))
+        try:
+            refreshed_scopes = granted_scopes(refreshed["access_token"])
+            old_account = request(issuer + "/api/v1/account", bearer=refreshed["access_token"])
+            refreshed_id = account_id(old_account)
+        except Failure:
+            raise Failure("refresh_uncertain", "Cannot verify the refreshed connection. Revoke the connection in your account and reconnect.", 3) from None
+        if refreshed_scopes != old_scopes:
+            raise Failure("refresh_permissions_changed", "The refreshed connection has different permissions. Revoke the connection in your account and reconnect.", 3)
+        if refreshed_id != old_subject:
+            raise Failure("refresh_account_changed", "The refreshed connection belongs to a different account. It was not saved. Revoke the connection in your account and reconnect.", 3)
+        store.write(refreshed)
+        original = refreshed
+    else:
+        old_account = request(issuer + "/api/v1/account", bearer=original["access_token"])
     old_id = account_id(old_account)
-    scopes = granted_scopes(original["access_token"]) | additions
+    scopes = old_scopes | additions
     new = authorize(issuer, args.client_id, args.browser_driver, args.callback_timeout, scopes=" ".join(sorted(scopes)))
     access = new.get("access_token") if isinstance(new, dict) else None
     try:
@@ -362,6 +387,8 @@ def run(args):
                     store.write(token)
                     token = store.save(request(issuer + "/oauth/token", {"grant_type": "refresh_token", "client_id": args.client_id, "refresh_token": token["refresh_token"]}))
                     if kwargs.get("method"):
+                        if args.command == "notifications" and args.action == "delete":
+                            raise Failure("operation_not_retried", "The connection was refreshed. The deletion was not retried. Check the notification before deciding whether to retry.", 3) from None
                         raise Failure("operation_not_retried", "The connection was refreshed. The write was not retried. For event submissions, retry the exact command with the same IDs and payload. For create, reuse the same key and input.", 3) from None
                     return request(url, bearer=token["access_token"], **kwargs)
                 if (exc.code in ("network_error", "unexpected_response") or getattr(exc, "http_status", 0) >= 500) and args.command in ("leads", "notifications") and args.action == "delete":
