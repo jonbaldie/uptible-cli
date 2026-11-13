@@ -245,7 +245,7 @@ def token_subject(access):
         raise Failure("account_unknown", "Cannot verify the connected account. The connection remains unchanged.", 3) from None
 
 def recovery_instructions(args):
-    options = ["--json"] if args.json else []
+    options = ["--json"] if getattr(args, "json", False) else []
     if args.issuer:
         options.append("--issuer=" + args.issuer)
     if args.client_id != DEFAULT_CLIENT_ID or args.issuer:
