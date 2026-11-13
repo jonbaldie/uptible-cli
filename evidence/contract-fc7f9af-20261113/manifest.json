@@ -1,0 +1,10 @@
+{
+  "candidate": "fc7f9afa8fb63fc7e377f3719571d4d9a64956fa",
+  "base": "be546df74cc5c658238482fb6bab9a08c0b980f7",
+  "sha256": {
+    "author-evidence.zip": "0a6abcb24906a71ceb4bd3290fc5db706b321d4b4dc94335b9c32b2f53b5bf8b",
+    "AUTHOR-REPORT.md": "366bf39ea830d17b5af82cfd306b59795711057b442a270c11217cd0d6ab40d8"
+  },
+  "independent_verdict": "pending; author evidence only",
+  "package_status": "unpublished candidate; no tag, package registry or Homebrew publication"
+}
