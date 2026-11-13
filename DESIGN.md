@@ -1,5 +1,11 @@
 # Client design
 
+## HTTP failures
+
+The request boundary recognizes fixed API and OAuth error codes, canonical UUID request IDs, and documented validation field names. It ignores arbitrary server messages and validation values. `Failure` carries only that safe context. Recovery wrappers preserve it when changing the local outcome to an uncertain write or refresh, so JSON can distinguish the recovery code from the server code. Text output includes the request ID for support. HTTP status comes from the response, not the body.
+
+The existing read retry policy remains one extra request for HTTP 429 or 503 with a numeric `Retry-After` of at most two seconds; an absent header defaults to zero. Dates, longer delays and malformed values do not retry. The request timeout is 15 seconds and writes are not replayed automatically.
+
 ## Events and billing
 
 Event commands send the caller's notification ID, session ID, event ID and payload directly to the authenticated operations. The server owns receipt identity and processing. The client requires a processed receipt and never retries a write automatically. An uncertain outcome tells the customer to repeat the exact command.

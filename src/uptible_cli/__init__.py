@@ -16,6 +16,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -27,10 +28,59 @@ DEFAULT_ISSUER = "https://uptible.com"
 DEFAULT_CLIENT_ID = "5af9087d-4c3a-4bb9-a144-3cbf5560771a"
 SERVER_ERRORS = {"invalid_request", "invalid_client", "invalid_grant", "unauthorized_client", "unsupported_grant_type", "invalid_scope", "access_denied", "temporarily_unavailable", "server_error"}
 
+PROBLEM_ERRORS = {"bad_request", "unauthenticated", "forbidden", "not_found", "method_not_allowed", "conflict", "validation_error", "rate_limited", "upstream_unavailable", "internal_error", "request_error"}
+VALIDATION_FIELDS = {"message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions", "revision", "email", "name", "session_id", "event_id", "limit", "after", "notification_id", "from", "until", "cursor", "claim_cursor"}
+
 class Failure(Exception):
-    def __init__(self, code, message, exit_code=1):
+    def __init__(self, code, message, exit_code=1, *, http_status=0, correlation_id=None, fields=(), server_code=None):
         self.code, self.message, self.exit_code = code, message, exit_code
+        self.http_status, self.correlation_id = http_status, correlation_id
+        self.fields, self.server_code = fields, server_code
         super().__init__(message)
+
+    def reframe(self, code, message, exit_code=3):
+        return Failure(code, message, exit_code, http_status=self.http_status,
+                       correlation_id=self.correlation_id, fields=self.fields, server_code=self.server_code)
+
+    def output(self):
+        error = {"code": self.code, "message": self.message}
+        if self.http_status:
+            error["http_status"] = self.http_status
+        if self.correlation_id:
+            error["correlation_id"] = self.correlation_id
+        if self.fields:
+            error["fields"] = list(self.fields)
+        if self.server_code and self.server_code != self.code:
+            error["server_code"] = self.server_code
+        return {"error": error}
+
+def http_failure(status, payload):
+    code, correlation, fields = "http_error", None, ()
+    if isinstance(payload, dict):
+        problem, oauth = payload.get("code"), payload.get("error")
+        if isinstance(problem, str) and problem in PROBLEM_ERRORS:
+            code = problem
+        elif isinstance(oauth, str) and oauth in SERVER_ERRORS:
+            code = oauth
+        value = payload.get("correlation_id")
+        if isinstance(value, str):
+            try:
+                parsed = str(uuid.UUID(value))
+                if parsed == value.lower():
+                    correlation = parsed
+            except ValueError:
+                pass
+        if status == 422 and isinstance(payload.get("errors"), dict):
+            fields = tuple(sorted(VALIDATION_FIELDS.intersection(payload["errors"])))
+    message = f"Server rejected request (HTTP {status})."
+    if fields:
+        message += " Check these fields: " + ", ".join(fields) + "."
+    if status == 403:
+        message += " Check lifetime access and permissions for this connection."
+    elif status == 409:
+        message += " Check the request identity or current revision before retrying."
+    return Failure(code, message, 3, http_status=status, correlation_id=correlation,
+                   fields=fields, server_code=code if code != "http_error" else None)
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -64,23 +114,7 @@ def request(url, form=None, bearer=None, method=None, _retry=True, payload=None,
                 if retry_after.isdigit() and int(retry_after) <= 2:
                     time.sleep(int(retry_after))
                     return request(url, bearer=bearer, _retry=False)
-            code = "http_error"
-            fields = []
-            if isinstance(payload, dict) and isinstance(payload.get("error"), str) and payload["error"] in SERVER_ERRORS:
-                code = payload["error"]
-            if exc.code == 422 and isinstance(payload, dict) and isinstance(payload.get("errors"), dict):
-                allowed = {"message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions", "revision"}
-                fields = sorted(allowed.intersection(payload["errors"]))
-            message = f"Server rejected request (HTTP {exc.code})."
-            if fields:
-                message += " Check these fields: " + ", ".join(fields) + "."
-            if exc.code == 403:
-                message += " Check lifetime access and permissions for this connection."
-            elif exc.code == 409:
-                message += " Check the request identity or current revision before retrying."
-            failure = Failure(code, message, 3)
-            failure.http_status = exc.code
-            raise failure from None
+            raise http_failure(exc.code, payload) from None
     except Failure:
         raise
     except (Exception, KeyboardInterrupt):
@@ -216,7 +250,7 @@ def authorize(issuer, client, browser, timeout, delete_leads=False, events=False
         except Failure as exc:
             if getattr(exc, "http_status", None) == 400 and exc.code in {"invalid_request", "invalid_client", "invalid_grant", "unauthorized_client", "unsupported_grant_type", "invalid_scope"}:
                 raise
-            raise Failure("login_uncertain", "A grant may have been created. Check your account connections and revoke any unintended connection before retrying.", 3) from None
+            raise exc.reframe("login_uncertain", "A grant may have been created. Check your account connections and revoke any unintended connection before retrying.") from None
 
 def granted_scopes(access):
     try:
@@ -265,7 +299,7 @@ def refresh_connection(issuer, client, store, original, recovery, scopes=None):
         try:
             old_id = token_subject(original["access_token"])
         except Failure as exc:
-            raise Failure(exc.code, exc.message + " " + recovery, exc.exit_code) from None
+            raise exc.reframe(exc.code, exc.message + " " + recovery, exc.exit_code) from None
     original["refresh_pending"] = True
     store.write(original)
     refreshed = store.validate(request(issuer + "/oauth/token", {"grant_type":"refresh_token", "client_id":client, "refresh_token":original["refresh_token"]}))
@@ -274,8 +308,8 @@ def refresh_connection(issuer, client, store, original, recovery, scopes=None):
             refreshed_scopes = granted_scopes(refreshed["access_token"])
         account = request(issuer + "/api/v1/account", bearer=refreshed["access_token"])
         refreshed_id = account_id(account)
-    except Failure:
-        raise Failure("refresh_uncertain", "Cannot verify the refreshed connection. " + recovery, 3) from None
+    except Failure as exc:
+        raise exc.reframe("refresh_uncertain", "Cannot verify the refreshed connection. " + recovery) from None
     if scopes is not None and refreshed_scopes != scopes:
         raise Failure("refresh_permissions_changed", "The refreshed connection has different permissions. " + recovery, 3)
     if refreshed_id != old_id:
@@ -293,7 +327,7 @@ def upgrade(args, issuer, store, original, recovery):
     try:
         old_scopes = granted_scopes(original["access_token"])
     except Failure as exc:
-        raise Failure(exc.code, exc.message + " " + recovery, exc.exit_code) from None
+        raise exc.reframe(exc.code, exc.message + " " + recovery, exc.exit_code) from None
     if time.time() >= original["expires_at"]:
         original, old_account = refresh_connection(issuer, args.client_id, store, original, recovery, old_scopes)
     else:
@@ -325,13 +359,13 @@ def upgrade(args, issuer, store, original, recovery):
             raise Failure("login_uncertain", "A grant may have been created. Check account connections before retrying.", 3) from None
         try:
             request(issuer + "/api/v1/logout", form={}, bearer=access)
-        except Failure:
-            raise Failure("cleanup_unconfirmed", "The existing connection was retained, but revocation of the new grant could not be confirmed. Check account connections.", 3) from None
+        except Failure as cleanup:
+            raise cleanup.reframe("cleanup_unconfirmed", "The existing connection was retained, but revocation of the new grant could not be confirmed. Check account connections.") from None
         raise exc
     try:
         request(issuer + "/api/v1/logout", form={}, bearer=original["access_token"])
-    except Failure:
-        raise Failure("cleanup_unconfirmed", "The new connection was saved, but revocation of the old grant could not be confirmed. Check account connections.", 3) from None
+    except Failure as cleanup:
+        raise cleanup.reframe("cleanup_unconfirmed", "The new connection was saved, but revocation of the old grant could not be confirmed. Check account connections.") from None
     return {"connected": True, "account": new_account}
 
 def run(args):
@@ -394,8 +428,8 @@ def run(args):
                 if isinstance(access, str) and access:
                     try:
                         request(issuer + "/api/v1/logout", form={}, bearer=access)
-                    except Failure:
-                        raise Failure("cleanup_unconfirmed", "Login failed and grant revocation could not be confirmed. Revoke the connection in your account before retrying.", 3) from None
+                    except Failure as cleanup:
+                        raise cleanup.reframe("cleanup_unconfirmed", "Login failed and grant revocation could not be confirmed. Revoke the connection in your account before retrying.") from None
                 else:
                     raise Failure("login_uncertain", "A grant may have been created. Check your account connections and revoke any unintended connection before retrying.", 3) from None
                 raise exc
@@ -424,16 +458,16 @@ def run(args):
                     token, _ = refresh_connection(issuer, args.client_id, store, token, recovery)
                     if kwargs.get("method"):
                         if args.command == "notifications" and args.action == "delete":
-                            raise Failure("operation_not_retried", "The connection was refreshed. The deletion was not retried. Check the notification before deciding whether to retry.", 3) from None
-                        raise Failure("operation_not_retried", "The connection was refreshed. The write was not retried. For event submissions, retry the exact command with the same IDs and payload. For create, reuse the same key and input.", 3) from None
+                            raise exc.reframe("operation_not_retried", "The connection was refreshed. The deletion was not retried. Check the notification before deciding whether to retry.") from None
+                        raise exc.reframe("operation_not_retried", "The connection was refreshed. The write was not retried. For event submissions, retry the exact command with the same IDs and payload. For create, reuse the same key and input.") from None
                     return request(url, bearer=token["access_token"], **kwargs)
                 if (exc.code in ("network_error", "unexpected_response") or getattr(exc, "http_status", 0) >= 500) and args.command in ("leads", "notifications") and args.action == "delete":
                     resource = "lead" if args.command == "leads" else "notification"
-                    raise Failure("delete_uncertain", f"The deletion outcome is unknown. Check the {resource} before deciding whether to retry.", 3) from None
+                    raise exc.reframe("delete_uncertain", f"The deletion outcome is unknown. Check the {resource} before deciding whether to retry.") from None
                 if (exc.code == "network_error" or getattr(exc, "http_status", 0) >= 500) and args.command == "notifications" and args.action == "create":
-                    raise Failure("create_uncertain", "The create outcome is unknown. Retry the same input with the same idempotency key.", 3) from None
+                    raise exc.reframe("create_uncertain", "The create outcome is unknown. Retry the same input with the same idempotency key.") from None
                 if (exc.code == "network_error" or getattr(exc, "http_status", 0) >= 500) and args.command == "events":
-                    raise Failure("event_uncertain", "The event outcome is unknown. Retry the exact command with the same IDs and payload.", 3) from None
+                    raise exc.reframe("event_uncertain", "The event outcome is unknown. Retry the exact command with the same IDs and payload.") from None
                 raise
         if args.command == "events":
             payload = {"session_id": args.session_id, "event_id": args.event_id}
@@ -606,8 +640,10 @@ def main():
         return exc.exit_code
     except Failure as exc:
         if args.json:
-            print(json.dumps({"error": {"code": exc.code, "message": exc.message}}, sort_keys=True), file=sys.stderr)
+            print(json.dumps(exc.output(), sort_keys=True), file=sys.stderr)
         else:
             print(f"Error: {exc.message}", file=sys.stderr)
+            if exc.correlation_id:
+                print(f"Request ID: {exc.correlation_id}", file=sys.stderr)
         return exc.exit_code
     return 0

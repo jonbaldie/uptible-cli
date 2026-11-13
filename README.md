@@ -115,6 +115,10 @@ Older connections may not contain a recorded account ID. If their access token h
 
 Add `--json` before the command for machine-readable output. Results are JSON objects on standard output. Operational errors are JSON objects on standard error with `error.code` and `error.message`. Argument parser errors use standard text even with `--json`. Output can contain account information, but not credentials.
 
+Recognized API and OAuth error codes are retained. HTTP failures also include `error.http_status`. A valid server request ID appears as `error.correlation_id` in JSON and as `Request ID` in text output; include it when reporting a failed request. Validation failures can include `error.fields`, containing recognized field names. Server messages and validation values are not printed. If a write outcome is uncertain, `error.code` keeps the recovery outcome, such as `create_uncertain`, and `error.server_code` retains the recognized server code when available.
+
+HTTP requests have a 15-second timeout. A read receiving HTTP 429 or 503 retries at most once when `Retry-After` is an integer from 0 to 2 seconds. A missing header causes one immediate retry. A date, a longer delay, or a malformed value does not trigger a retry. Writes are never automatically replayed.
+
 Exit codes are `0` for success, `2` for usage or configuration errors, `3` for server or network failures, and `1` for other failures. Use `uptible --help` and command-specific help such as `uptible auth login --help` for options.
 
 ## Current limitations
