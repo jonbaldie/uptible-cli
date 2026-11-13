@@ -1,6 +1,34 @@
 """Local syntax discovery from the execution parser, without dispatch."""
 import argparse
+import os
 import re
+import shlex
+
+
+def bash_words(line, point):
+    raw = os.fsencode(line)
+    if not 0 <= point <= len(raw) or len(raw) > 32768:
+        raise ValueError("Invalid completion line")
+    lexer = shlex.shlex(os.fsdecode(raw[:point]), posix=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    words = []
+    trailing = True
+    while True:
+        try:
+            word = lexer.get_token()
+        except ValueError:
+            words.append(lexer.token)
+            break
+        if word is None:
+            if trailing:
+                words.append("")
+            break
+        words.append(word)
+        trailing = lexer.state == " "
+    if not 1 < len(words) <= 256:
+        raise ValueError("Invalid completion words")
+    return words
 
 
 def candidates(parser, previous, current):
@@ -74,26 +102,12 @@ def candidates(parser, previous, current):
 def shell_script(shell):
     if shell == "bash":
         return '''_uptible_complete() {
-    local candidate word
-    local -a query
-    local index=0 i
-    query=("${COMP_WORDS[0]}")
-    for ((i=1; i<=COMP_CWORD; i++)); do
-        word=${COMP_WORDS[i]}
-        if [[ ( $word == = || $word == : ) && $i -gt 1 ]]; then
-            query[index]="${query[index]}$word"
-        elif [[ $i -gt 1 && ( ${COMP_WORDS[i-1]} == = || ${COMP_WORDS[i-1]} == : ) ]]; then
-            query[index]="${query[index]}$word"
-        else
-            ((index+=1))
-            query[index]=$word
-        fi
-    done
+    local candidate
     COMPREPLY=()
     while IFS= read -r candidate; do
         [[ -n $candidate ]] && COMPREPLY+=("$candidate")
-    done < <(command uptible --_complete "$index" "${query[@]}"; printf '\\n')
-    if [[ $COMP_WORDBREAKS == *'='* && ${query[index]} == *=* ]]; then
+    done < <(command uptible --_complete-bash "$COMP_POINT" "$COMP_LINE"; printf '\\n')
+    if [[ $COMP_WORDBREAKS == *'='* && ${COMPREPLY[0]} == *=* ]]; then
         COMPREPLY=("${COMPREPLY[@]#*=}")
     fi
     return 0

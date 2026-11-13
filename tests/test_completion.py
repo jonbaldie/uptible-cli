@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 import uptible_cli
-from uptible_cli.completion import candidates, shell_script
+from uptible_cli.completion import bash_words, candidates
 
 
 class CompletionTests(unittest.TestCase):
@@ -64,6 +64,22 @@ class CompletionTests(unittest.TestCase):
             with self.subTest(words=words):
                 self.assertEqual(self.complete(*words), [])
 
+    def test_bash_partial_words(self):
+        for line, expected in [
+                ("uptible --profile 'synthetic name' auth ", ['uptible', '--profile', 'synthetic name', 'auth', '']),
+                ('uptible --profile : auth ', ['uptible', '--profile', ':', 'auth', '']),
+                ('uptible --profile = auth ', ['uptible', '--profile', '=', 'auth', '']),
+                ('uptible --profile "unfinished ', ['uptible', '--profile', 'unfinished ']),
+                ('uptible --profile x\\ ', ['uptible', '--profile', 'x ']),
+                ('uptible --profile x\\', ['uptible', '--profile', 'x']),
+                ('uptible --profile café auth ', ['uptible', '--profile', 'café', 'auth', '']),
+                ('uptible no trailing', ['uptible', 'no'])]:
+            point = len(line.encode()) if line != 'uptible no trailing' else len('uptible no')
+            self.assertEqual(bash_words(line, point), expected)
+        for line, point in [('', 0), ('uptible', 20), ('uptible ', -1), ('x' * 32769, 1)]:
+            with self.assertRaises(ValueError):
+                bash_words(line, point)
+
     def test_parser_aliases_and_fixed_choices(self):
         parser = argparse.ArgumentParser()
         parser.add_subparsers().add_parser('example', aliases=['ex']).add_argument('--format', choices=['json', 'text'])
@@ -72,7 +88,7 @@ class CompletionTests(unittest.TestCase):
         self.assertEqual(candidates(parser, ['ex'], '--format=t'), ['--format=text'])
 
     def test_local_entry_points_do_not_dispatch(self):
-        for args in [['completion', 'bash'], ['completion', 'zsh'], ['--_complete', '1', 'uptible', ''],
+        for args in [['completion', 'bash'], ['completion', 'zsh'], ['--_complete', '1', 'uptible', ''], ['--_complete-bash', '8', 'uptible '],
                      ['--_complete', '4', 'uptible', 'auth', 'logout', '--local', '']]:
             with self.subTest(args=args), patch.object(sys, 'argv', ['uptible', *args]), \
                     patch.object(uptible_cli, 'run', side_effect=AssertionError('dispatch')), \
@@ -95,6 +111,8 @@ class CompletionTests(unittest.TestCase):
                  (['uptible', 'billing', 'status', '--c'], ['--claim-cursor', '--cursor']),
                  (['uptible', 'leads', 'list', '--limit', '99'], ['99']),
                  (['uptible', '--profile', 'synthetic profile', 'stats', ''], ['show']),
+                 (['uptible', '--profile', ':', 'auth', ''], ['login', 'logout', 'status']),
+                 (['uptible', '--profile', '=', 'auth', ''], ['login', 'logout', 'status']),
                  (['uptible', 'auth', 'login', '--browser-driver', ''], []),
                  (['uptible', 'bad', ''], []),
                  (['uptible', 'notifications', 'create', '--message', '$(touch marker)', '--no-'], ['--no-display-maps-only'])]
@@ -131,14 +149,15 @@ sys.exit(uptible_cli.main())
                         result = self.drive_shell(shell, script, words, tmp, env)
                         self.assertEqual(result, expected)
                 if shell == 'bash':
-                    self.assertEqual(self.drive_shell(shell, script, ['uptible', 'leads', 'list', '--limit', '=', '99'], tmp, env), ['99'])
-                    self.assertEqual(self.drive_shell(shell, script, ['uptible', '--issuer', 'https', ':', '//example.invalid', '--client-id', 'synthetic', 'auth', ''], tmp, env), ['login', 'logout', 'status'])
+                    self.assertEqual(self.drive_shell(shell, script, ['uptible', 'leads', 'list', '--limit', '=', '99'], tmp, env, 'uptible leads list --limit=99'), ['99'])
+                    self.assertEqual(self.drive_shell(shell, script, ['uptible', '--issuer', 'https', ':', '//example.invalid', '--client-id', 'synthetic', 'auth', ''], tmp, env, 'uptible --issuer https://example.invalid --client-id synthetic auth '), ['login', 'logout', 'status'])
                 self.assertFalse((tmp / 'marker').exists())
 
-    def drive_shell(self, shell, script, words, cwd, env):
+    def drive_shell(self, shell, script, words, cwd, env, raw_line=None):
+        line = raw_line or shlex.join(words)
         array = ' '.join(map(shlex.quote, words))
         if shell == 'bash':
-            command = f'source "$1"\n[[ $(complete -p uptible) == *"_uptible_complete"* ]] || exit 7\nCOMP_WORDS=({array})\nCOMP_CWORD={len(words) - 1}\n_uptible_complete\nprintf "%s\\n" "${{COMPREPLY[@]}}"'
+            command = f'source "$1"\n[[ $(complete -p uptible) == *"_uptible_complete"* ]] || exit 7\nCOMP_WORDS=({array})\nCOMP_CWORD={len(words) - 1}\nCOMP_LINE={shlex.quote(line)}\nCOMP_POINT={len(line.encode())}\n_uptible_complete\nprintf "%s\\n" "${{COMPREPLY[@]}}"'
         else:
             command = f'autoload -Uz compinit\ncompinit -D\nsource "$1"\n[[ $_comps[uptible] == _uptible_complete ]] || exit 7\ncompadd() {{ shift; printf "%s\\n" "$@"; }}\nwords=({array})\nCURRENT={len(words)}\n_uptible_complete'
         result = subprocess.run([shell, '-f' if shell == 'zsh' else '--noprofile', '-c', command, 'test', str(script)],

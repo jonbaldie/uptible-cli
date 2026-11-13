@@ -623,13 +623,19 @@ def build_parser():
 
 
 def main():
-    from .completion import candidates, shell_script
+    from .completion import bash_words, candidates, shell_script
 
     p = build_parser()
-    if sys.argv[1:2] == ["--_complete"]:
+    if sys.argv[1:2] in (["--_complete"], ["--_complete-bash"]):
         try:
             index = int(sys.argv[2])
-            words = sys.argv[3:]
+            if sys.argv[1] == "--_complete-bash":
+                if len(sys.argv) != 4:
+                    return 2
+                words = bash_words(sys.argv[3], index)
+                index = len(words) - 1
+            else:
+                words = sys.argv[3:]
             if not 0 < index < len(words) or len(words) > 256 or sum(map(len, words)) > 32768:
                 return 2
         except (IndexError, ValueError):
