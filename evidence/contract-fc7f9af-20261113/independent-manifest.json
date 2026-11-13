@@ -1,0 +1,8 @@
+{
+  "candidate": "fc7f9afa8fb63fc7e377f3719571d4d9a64956fa",
+  "public_cli_only": true,
+  "sha256": {
+    "independent-evidence.zip": "a853c75dc4a54711c922e503031ba7008408f98b468436f689585b4fd68e2260",
+    "INDEPENDENT-VERDICT.md": "12503b04043b95754a4f987aae5b9b6bbe10a09477a3485a550c486ee7896146"
+  }
+}
