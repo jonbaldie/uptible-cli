@@ -25,6 +25,7 @@ class IntegrationTargetGuard(unittest.TestCase):
             'https://uptible.com', 'https://www.uptible.com', 'https://UPTIBLE.COM',
             'https://uptible.com.', 'https://www.uptible.com.',
             'https://ｕｐｔｉｂｌｅ.com', 'https://uptible。com',
+            'https://%75ptible.com', 'https://uptible%2ecom', 'https://uptible.com%2e',
         ):
             with self.subTest(issuer=issuer), mock.patch.object(
                 subprocess, 'run', side_effect=AssertionError('Login must not start'),
