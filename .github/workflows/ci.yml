@@ -24,6 +24,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
+      - name: Install completion test shells
+        run: sudo apt-get update && sudo apt-get install -y zsh
       - name: Build and verify installed wheel
         run: python scripts/verify-artifact.py "$RUNNER_TEMP/verified"
       - uses: actions/upload-artifact@v6

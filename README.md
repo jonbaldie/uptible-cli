@@ -121,6 +121,36 @@ HTTP requests have a 15-second timeout. A read receiving HTTP 429 or 503 retries
 
 Exit codes are `0` for success, `2` for usage or configuration errors, `3` for server or network failures, and `1` for other failures. Use `uptible --help` and command-specific help such as `uptible auth login --help` for options.
 
+## Enable shell completion
+
+Completion discovers local command names, options and fixed choices. It never reads saved credentials, opens a browser, contacts the service or runs an account action. Free-form values such as account identifiers, file paths, email addresses and cursors have no suggestions. Root options such as `--profile` and `--json` belong before the command, as in normal execution.
+
+Generate the Bash function from the installed CLI, then load it in your current shell:
+
+```sh
+mkdir -p ~/.local/share/uptible
+uptible completion bash > ~/.local/share/uptible/completion.bash
+source ~/.local/share/uptible/completion.bash
+```
+
+Add `source ~/.local/share/uptible/completion.bash` to your Bash startup file to load it in future shells. Bash 3.2 and later are supported.
+
+For Zsh, initialize its completion system before loading the generated function:
+
+```sh
+mkdir -p ~/.local/share/uptible
+uptible completion zsh > ~/.local/share/uptible/completion.zsh
+autoload -Uz compinit
+compinit
+source ~/.local/share/uptible/completion.zsh
+```
+
+Add those last three lines to `~/.zshrc`. If your configuration already runs `compinit`, add only the `source` line after it. Zsh 5.9 is exercised by the shell checks.
+
+In either shell, type `uptible no` and press Tab to complete `notifications`. Type `uptible auth lo` and press Tab twice to see `login` and `logout`. Type `uptible leads list --limit 9` and press Tab twice for the matching fixed numeric choices. `uptible notifications edit 123 --no-` completes `--no-display-maps-only`.
+
+After upgrading the installed CLI, rerun the generation command for your shell and source the resulting file again. Candidates come from the installed parser on each Tab press. Use `uptible completion --help` to find the supported shells. Generation and querying require the installed `uptible` executable on `PATH`.
+
 ## Current limitations
 
 | Operation | Command |
@@ -153,7 +183,7 @@ To build and verify the committed checkout as installable distributions, run:
 python3 scripts/verify-artifact.py /tmp/uptible-verified
 ```
 
-The output directory must be empty and the checkout clean. The command builds twice from the commit in independent environments with hashed build and runtime inputs from PyPI. It compares artifact hashes and selected dependency hashes, checks package file lists, installs the wheel, and runs all synthetic tests outside the checkout. It also requires altered dependency bytes and an unexpected wheel member to fail verification. The artifacts include `BUILD_MANIFEST.json`, `SOURCE_REVISION`, `SHA256SUMS`, dependency reports, and negative-control logs. See [the release design](DESIGN.md#release-inputs-and-reproducibility) for the exact reproducibility claim and supported matrix. CI runs Python 3.11 through 3.14 on Linux. These checks do not establish operating-system keyring support or deployed-service compatibility. Remaining command coverage stays in issue #1.
+The output directory must be empty and the checkout clean. The command builds twice from the commit in independent environments with hashed build and runtime inputs from PyPI. It compares artifact hashes and selected dependency hashes, checks package file lists, installs the wheel, and runs all synthetic tests outside the checkout. It requires altered dependency bytes, an unexpected wheel member, an omitted completion command and broken generated shell code to fail verification. Install Bash and Zsh before running this gate. The artifacts include `BUILD_MANIFEST.json`, `SOURCE_REVISION`, `SHA256SUMS`, dependency reports, and negative-control logs. See [the release design](DESIGN.md#release-inputs-and-reproducibility) for the exact reproducibility claim and supported matrix. CI runs Python 3.11 through 3.14 on Linux. These checks do not establish operating-system keyring support or deployed-service compatibility. Remaining command coverage stays in issue #1.
 
 ## Release
 

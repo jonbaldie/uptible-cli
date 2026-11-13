@@ -17,14 +17,14 @@ import venv
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-WHEEL_FILES = {'uptible_cli/__init__.py', 'uptible_cli/__main__.py'}
+WHEEL_FILES = {'uptible_cli/__init__.py', 'uptible_cli/__main__.py', 'uptible_cli/completion.py'}
 DIST_INFO = re.compile(r'uptible_cli-[^/]+\.dist-info/(METADATA|WHEEL|entry_points.txt|top_level.txt|RECORD)')
 SOURCE_FILES = {'PKG-INFO', 'README.md', 'pyproject.toml', 'setup.cfg',
-                'src/uptible_cli/__init__.py', 'src/uptible_cli/__main__.py',
+                'src/uptible_cli/__init__.py', 'src/uptible_cli/__main__.py', 'src/uptible_cli/completion.py',
                 'src/uptible_cli.egg-info/PKG-INFO', 'src/uptible_cli.egg-info/SOURCES.txt',
                 'src/uptible_cli.egg-info/dependency_links.txt', 'src/uptible_cli.egg-info/entry_points.txt',
                 'src/uptible_cli.egg-info/requires.txt', 'src/uptible_cli.egg-info/top_level.txt',
-                'tests/test_cli.py'}
+                'tests/test_cli.py', 'tests/test_completion.py'}
 
 
 def sha256(path):
@@ -63,7 +63,7 @@ def check_wheel(path):
     with zipfile.ZipFile(path) as wheel:
         names = wheel.namelist()
     files = set(names)
-    if (len(names) != 7 or len(files) != 7 or not WHEEL_FILES <= files
+    if (len(names) != len(WHEEL_FILES) + 5 or len(files) != len(WHEEL_FILES) + 5 or not WHEEL_FILES <= files
             or len({name.split('/')[0] for name in files - WHEEL_FILES}) != 1
             or any(name not in WHEEL_FILES and not DIST_INFO.fullmatch(name) for name in files)):
         raise ValueError(f'Unexpected wheel contents: {sorted(files)}')
@@ -158,6 +158,36 @@ def negative_controls(tmp, source, wheel, dest, env):
         raise ValueError('Unexpected artifact member was accepted')
 
 
+def completion_controls(python, source, tmp, dest, env):
+    module = Path(subprocess.check_output([python, '-c',
+                  'import uptible_cli.completion as c; print(c.__file__)'], cwd=tmp, env=env, text=True).strip())
+    original = module.read_text()
+    mutations = {
+        'omitted-completion-command': original.replace('    return sorted(prefix + value for value in values',
+            '    values = [value for value in values if value != "notifications"]\n    return sorted(prefix + value for value in values'),
+        'broken-completion-shell': original.replace('_uptible_complete() {', '_uptible_complete() ('),
+    }
+    try:
+        for name, mutated in mutations.items():
+            if mutated == original:
+                raise ValueError('Completion negative control did not change the installed module')
+            module.write_text(mutated)
+            for cached in module.parent.glob('__pycache__/completion.*.pyc'):
+                cached.unlink()
+            result = subprocess.run([python, '-m', 'unittest', 'discover', '-s', source / 'tests',
+                                     '-p', 'test_completion.py', '-v'], cwd=tmp, env=env, text=True, capture_output=True)
+            (dest / (name + '.log')).write_text(result.stdout + result.stderr)
+            if result.returncode == 0 or 'FAILED' not in result.stderr:
+                raise ValueError(f'Completion negative control was not rejected: {name}')
+    finally:
+        module.write_text(original)
+        for cached in module.parent.glob('__pycache__/completion.*.pyc'):
+            cached.unlink()
+    if module.read_text() != original:
+        raise ValueError('Completion negative control did not restore the installed module')
+    run(python, '-m', 'unittest', 'discover', '-s', source / 'tests', '-p', 'test_completion.py', '-v', cwd=tmp, env=env)
+
+
 def main():
     if len(sys.argv) != 2:
         sys.exit('Usage: python scripts/verify-artifact.py OUTPUT_DIRECTORY')
@@ -165,6 +195,8 @@ def main():
         sys.exit('Release verification supports CPython 3.11 through 3.14 on macOS and Linux')
     if output('git', 'status', '--porcelain', '--untracked-files=all'):
         sys.exit('Commit or remove all checkout changes before verification')
+    if not all(shutil.which(shell) for shell in ('bash', 'zsh')):
+        sys.exit('Artifact verification requires Bash and Zsh for completion checks')
     revision = output('git', 'rev-parse', 'HEAD')
     epoch = int(output('git', 'show', '-s', '--format=%ct', revision))
     dest = Path(sys.argv[1]).resolve()
@@ -210,6 +242,7 @@ def main():
         run(cli, '--help', cwd=tmp, env=env)
         run(python, '-c', 'import importlib.metadata as m, uptible_cli; from pathlib import Path; import sys; assert m.version("uptible-cli") == sys.argv[1]; assert Path(uptible_cli.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()); assert any(e.name == "uptible" and e.value == "uptible_cli:main" for e in m.entry_points(group="console_scripts"))', version, cwd=tmp, env=env)
         run(python, '-m', 'unittest', 'discover', '-s', source / 'tests', '-v', cwd=tmp, env=env)
+        completion_controls(python, source, tmp, dest, env)
         negative_controls(tmp, source, next(p for p in artifacts if p.suffix == '.whl'), dest, env)
         for path in artifacts:
             shutil.copyfile(path, dest / path.name)
@@ -220,7 +253,9 @@ def main():
                     'module_sha256': sha256(source / 'src/uptible_cli/__init__.py'),
                     'inputs': {name: sha256(source / 'scripts' / name) for name in
                                ('verification-requirements.txt', 'runtime-requirements.txt', 'homebrew-resources.json')},
-                    'negative_controls': ['tampered dependency hash rejected', 'unexpected wheel member rejected']}
+                    'negative_controls': ['tampered dependency hash rejected', 'unexpected wheel member rejected',
+                                          'omitted completion command rejected', 'broken generated shell rejected']}
+
         (dest / 'BUILD_MANIFEST.json').write_text(json.dumps(manifest, indent=2) + '\n')
         (dest / 'SHA256SUMS').write_text(''.join(f'{digest}  {name}\n' for name, digest in sorted(hashes.items())))
         (dest / 'SOURCE_REVISION').write_text(revision + '\n')
