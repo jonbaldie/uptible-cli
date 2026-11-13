@@ -55,6 +55,15 @@ class Server(BaseHTTPRequestHandler):
         self.fault_requests.append((self.command, self.path, echoed))
         if self.response_fault[2] == 'bad-status':
             self.connection.sendall(b'INVALID synthetic-untrusted-marker ' + echoed + b'\r\n\r\n')
+        elif self.response_fault[2] in ('nested-200', 'nested-503'):
+            body = b'[' * 2000 + b']' * 2000
+            status = 200 if self.response_fault[2] == 'nested-200' else 503
+            self.send_response(status, 'synthetic-untrusted-marker ' + echoed.decode())
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            self.wfile.flush()
         else:
             partial = b'{"error":"synthetic-untrusted-marker ' + echoed + b'"'
             self.send_response(503)
@@ -747,10 +756,10 @@ urllib.request.urlopen(url, timeout=5).read()
 
     def test_notification_delete_protocol_damage_is_uncertain_without_replay(self):
         Server.jwt_mode = True
-        Server.notification_records = {7: {'owner': 42}, 8: {'owner': 42}}
+        Server.notification_records = {7: {'owner': 42}, 8: {'owner': 42}, 9: {'owner': 42}}
         self.assertEqual(self.run_cli('auth', 'login', '--delete-notifications', '--browser-driver', str(self.driver))[0].returncode, 0)
         access = json.loads(self.creds.read_text())['access_token']
-        for identifier, kind in ((7, 'bad-status'), (8, 'truncated-503')):
+        for identifier, kind in ((7, 'bad-status'), (8, 'truncated-503'), (9, 'nested-503')):
             with self.subTest(kind=kind):
                 path = '/api/v1/notifications/' + str(identifier)
                 Server.response_fault = ('DELETE', path, kind)
@@ -780,7 +789,7 @@ urllib.request.urlopen(url, timeout=5).read()
             ('POST', '/api/v1/logout', ('auth', 'logout'), 'network_error', 'http_error'),
         )
         for method, path, command, bad_status, truncated in cases:
-            for kind, expected in (('bad-status', bad_status), ('truncated-503', truncated)):
+            for kind, expected in (('bad-status', bad_status), ('truncated-503', truncated), ('nested-503', truncated)):
                 for json_mode in (True, False):
                     with self.subTest(method=method, path=path, kind=kind, json_mode=json_mode):
                         Server.fault_requests = []
@@ -800,6 +809,22 @@ urllib.request.urlopen(url, timeout=5).read()
                         else:
                             self.assertTrue(result.stderr.startswith('Error: '))
         Server.response_fault = None
+
+    def test_deep_success_response_is_valid_or_a_safe_network_error(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        access = json.loads(self.creds.read_text())['access_token']
+        Server.response_fault = ('GET', '/api/v1/account', 'nested-200')
+        result = subprocess.run(self.base + ['account', 'show'], capture_output=True, text=True, timeout=10)
+        self.assertTrue(access.encode() in Server.fault_requests[-1][2])
+        self.assertFalse(access in result.stderr, 'The bearer credential reached error output')
+        self.assertFalse('synthetic-untrusted-marker' in result.stderr, 'Server text reached error output')
+        if result.returncode == 0:
+            self.assertEqual(result.stderr, '')
+            self.assertTrue(result.stdout.startswith('[['))
+        else:
+            self.assertEqual(result.returncode, 3)
+            self.assertEqual(json.loads(result.stderr)['error']['code'], 'network_error')
 
     def test_login_fault_never_exposes_the_authorization_form(self):
         Server.jwt_mode = True
