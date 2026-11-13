@@ -14,6 +14,21 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
+def nested_claim_token(access):
+    header, encoded, signature = access.split('.')
+    claims = base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4))
+    claims = claims[:-1] + b',"unused":' + b'[' * 1500 + b'0' + b']' * 1500 + b'}'
+    return header + '.' + base64.urlsafe_b64encode(claims).decode().rstrip('=') + '.' + signature
+
+
+def nested_claim_readable():
+    try:
+        json.loads('{"unused":' + '[' * 1500 + '0' + ']' * 1500 + '}')
+    except RecursionError:
+        return False
+    return True
+
+
 class Server(BaseHTTPRequestHandler):
     calls = []
     authorization = None
@@ -38,6 +53,9 @@ class Server(BaseHTTPRequestHandler):
     delete_success_status = 204
     response_fault = None
     fault_requests = []
+    token_fault = None
+    issued_access = None
+    logout_bearers = []
     interrupt_started = None
     interrupt_release = None
     account_payload = None
@@ -193,12 +211,20 @@ class Server(BaseHTTPRequestHandler):
                 account = self.refresh_account if refreshing and self.refresh_account is not None else self.account_number
                 claims = {'scopes': scopes, 'account': account, 'sub': str(account), 'grant': self.grant_number}
                 access = 'header.' + base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=') + '.signature'
+            if self.token_fault and form.get('grant_type') == [self.token_fault[0]]:
+                if self.token_fault[1] == 'deep':
+                    access = nested_claim_token(access)
+                elif self.token_fault[1] == 'invalid':
+                    access = 'header.' + base64.urlsafe_b64encode(b'{"scopes":').decode().rstrip('=') + '.signature'
+            type(self).issued_access = access
             self.respond({'access_token': access, 'refresh_token': self.current_refresh, 'expires_in': 60})
-        elif self.path == '/api/v1/logout' and self.reject_logout:
-            self.respond({'error': 'synthetic-secret-marker'}, 503)
         elif self.path == '/api/v1/logout':
-            self.send_response(204)
-            self.end_headers()
+            self.logout_bearers.append(self.headers.get('Authorization'))
+            if self.reject_logout:
+                self.respond({'error': 'synthetic-secret-marker'}, 503)
+            else:
+                self.send_response(204)
+                self.end_headers()
         else:
             self.respond({'error': 'unknown'}, 404)
     def do_PUT(self):
@@ -351,6 +377,9 @@ class CLI(unittest.TestCase):
         Server.delete_success_status = 204
         Server.response_fault = None
         Server.fault_requests = []
+        Server.token_fault = None
+        Server.issued_access = None
+        Server.logout_bearers = []
         Server.account_payload = None
         Server.event_receipt = {'receipt': 'synthetic-receipt', 'status': 'processed'}
         self.temp = tempfile.TemporaryDirectory()
@@ -1064,6 +1093,126 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(result.returncode, 3)
         self.assertEqual(json.loads(result.stderr)['error']['code'], 'cleanup_unconfirmed')
         self.assertFalse(self.creds.exists())
+
+    def test_nested_legacy_subject_decodes_or_fails_without_changing_the_credential(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        saved = json.loads(self.creds.read_text())
+        saved.pop('account_id')
+        saved['expires_at'] = 0
+        saved['access_token'] = nested_claim_token(saved['access_token'])
+        self.creds.write_text(json.dumps(saved))
+        before = self.creds.read_bytes()
+        result = subprocess.run(self.base + ['account', 'show'], capture_output=True, text=True, timeout=10)
+        self.assertNotIn('Traceback', result.stderr)
+        for secret in (saved['access_token'], saved['refresh_token']):
+            self.assertFalse(secret in result.stdout + result.stderr, 'A credential reached the output')
+        if nested_claim_readable():
+            self.assertEqual((result.returncode, json.loads(result.stdout)['id']), (0, 42))
+            self.assertEqual(json.loads(self.creds.read_text())['account_id'], 42)
+            self.assertEqual(Server.refreshes, 1)
+        else:
+            self.assertEqual((result.returncode, json.loads(result.stderr)['error']['code']), (3, 'account_unknown'))
+            self.assertEqual(self.creds.read_bytes(), before)
+            self.assertEqual(Server.refreshes, 0)
+
+    def test_nested_refreshed_scopes_decode_or_leave_the_old_credential_pending(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        saved = json.loads(self.creds.read_text())
+        saved['expires_at'] = 0
+        self.creds.write_text(json.dumps(saved))
+        Server.token_fault = ('refresh_token', 'deep')
+        Server.account_payload = {'id': 42}
+        command = ['auth', 'login', '--add', '--delete-notifications', '--browser-driver', str(self.driver)]
+        result = subprocess.run(self.base + command, capture_output=True, text=True, timeout=10)
+        self.assertNotIn('Traceback', result.stderr)
+        for secret in (saved['access_token'], saved['refresh_token'], Server.issued_access):
+            self.assertFalse(secret in result.stdout + result.stderr, 'A credential reached the output')
+        self.assertEqual(Server.refreshes, 1)
+        if nested_claim_readable():
+            self.assertEqual((result.returncode, json.loads(result.stdout)['account']['id']), (0, 42))
+            self.assertEqual(json.loads(self.creds.read_text())['account_id'], 42)
+            self.assertEqual(Server.grant_number, 2)
+        else:
+            self.assertEqual((result.returncode, json.loads(result.stderr)['error']['code']), (3, 'refresh_uncertain'))
+            self.assertEqual(json.loads(self.creds.read_text()), dict(saved, refresh_pending=True))
+            self.assertEqual(Server.grant_number, 1)
+            self.assertEqual(Server.logout_bearers, [])
+
+    def test_undecodable_upgrade_grant_is_revoked_or_cleanup_is_reported(self):
+        for fault in ('deep', 'invalid'):
+            for reject_logout in (False, True):
+                with self.subTest(fault=fault, reject_logout=reject_logout):
+                    self.creds.unlink(missing_ok=True)
+                    Server.jwt_mode = True
+                    Server.token_fault = None
+                    Server.account_payload = None
+                    Server.reject_logout = False
+                    Server.current_refresh = 'first'
+                    Server.grant_number = 0
+                    Server.calls = []
+                    Server.logout_bearers = []
+                    self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+                    before = self.creds.read_bytes()
+                    saved = json.loads(before)
+                    Server.token_fault = ('authorization_code', fault)
+                    Server.account_payload = {'id': 42}
+                    Server.reject_logout = reject_logout
+                    command = ['auth', 'login', '--add', '--delete-notifications', '--browser-driver', str(self.driver)]
+                    result = subprocess.run(self.base + command, capture_output=True, text=True, timeout=10)
+                    self.assertNotIn('Traceback', result.stderr)
+                    for secret in (saved['access_token'], saved['refresh_token'], Server.issued_access):
+                        self.assertFalse(secret in result.stdout + result.stderr, 'A credential reached the output')
+                    self.assertEqual(Server.grant_number, 2)
+                    self.assertEqual(len(Server.logout_bearers), 1)
+                    if fault == 'deep' and nested_claim_readable():
+                        self.assertTrue(Server.logout_bearers[0] == 'Bearer ' + saved['access_token'])
+                        self.assertNotEqual(self.creds.read_bytes(), before)
+                        if reject_logout:
+                            self.assertEqual((result.returncode, json.loads(result.stderr)['error']['code']), (3, 'cleanup_unconfirmed'))
+                        else:
+                            self.assertEqual((result.returncode, json.loads(result.stdout)['account']['id']), (0, 42))
+                    else:
+                        self.assertTrue(Server.logout_bearers[0] == 'Bearer ' + Server.issued_access)
+                        self.assertEqual(self.creds.read_bytes(), before)
+                        expected = 'cleanup_unconfirmed' if reject_logout else 'scope_unknown'
+                        error = json.loads(result.stderr)['error']
+                        self.assertEqual((result.returncode, error['code']), (3, expected))
+                        if reject_logout:
+                            self.assertIn('revocation', error['message'])
+                            self.assertIn('could not be confirmed', error['message'])
+
+    def test_invalid_stored_claims_report_errors_without_refresh_or_traceback(self):
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        original = json.loads(self.creds.read_text())
+        original['refresh_token'] = 'synthetic-refresh-credential-marker'
+        for operation in ('subject', 'scopes'):
+            for access in (None, 7, 'synthetic-access-credential-marker', 'header.☃.signature'):
+                with self.subTest(operation=operation, access_type=type(access).__name__):
+                    saved = dict(original, access_token=access)
+                    if operation == 'subject':
+                        saved.pop('account_id')
+                        saved['expires_at'] = 0
+                        command = ['account', 'show']
+                        expected = 'account_unknown'
+                    else:
+                        saved['expires_at'] = 9999999999
+                        command = ['auth', 'login', '--add', '--events', '--browser-driver', str(self.driver)]
+                        expected = 'scope_unknown'
+                    self.creds.write_text(json.dumps(saved))
+                    before = self.creds.read_bytes()
+                    result = subprocess.run(self.base + command, capture_output=True, text=True, timeout=10)
+                    self.assertNotIn('Traceback', result.stderr)
+                    self.assertEqual((result.returncode, json.loads(result.stderr)['error']['code']), (3, expected))
+                    self.assertEqual(self.creds.read_bytes(), before)
+                    self.assertEqual(Server.refreshes, 0)
+                    self.assertEqual(Server.grant_number, 1)
+                    self.assertEqual(Server.logout_bearers, [])
+                    self.assertNotIn('synthetic-refresh-credential-marker', result.stdout + result.stderr)
+                    if isinstance(access, str):
+                        self.assertFalse(access in result.stdout + result.stderr, 'A credential reached the output')
 
     def test_ordinary_refresh_rejects_another_account_before_delete_or_read(self):
         for storage in ('new', 'legacy-jwt'):
