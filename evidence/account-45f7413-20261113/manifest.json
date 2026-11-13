@@ -1,0 +1,16 @@
+{
+  "candidate": "45f74138e58c5a57a592702fc1b0833781826a1d",
+  "base": "75c7526c8458899208ed523299a30a71a69670b7",
+  "sha256": {
+    "independent-acceptance-evidence.zip": "2fbd3005de58c594557ab0fbac3e5824c6df3880239ad7beabbf16d2b081bcfd",
+    "portable-evidence.zip": "5483572d65f937c03e27e34a4937c1c875fb5832bf4cdbd8eb4fa6d6632bb29b",
+    "guard-correction-evidence.zip": "f0af478695c6f240a8460cb3a3fec00d4854508e2cbe0294a01e67a7540fd0fe",
+    "PUBLIC-ACCEPTANCE.md": "771916e595bb4317ce5d9c77912cd5b97574a864e98c5cadb604ccb8272556c4",
+    "email-confirmed.png": "8d8a37b7e8c29e68c0fd9e08858a14cd8ea9295ad4961a4996344904e2d2fbd7",
+    "billing-handoff.png": "fd02cf585441507a9b9d6923affa685c20c31c14aae2790fa6ca5af01ce456af",
+    "notification-preview.png": "de7495ca21e2c14777b5880e7115501a240c076adfcaf41d0ec7c094cce9ab57"
+  },
+  "independent_verdict": "PASS+NOTES; bounded CLI unit only",
+  "browser_evidence": "Retained earlier exact product bytes, not a fresh final-commit browser run.",
+  "native_browser_render_verified": false
+}
