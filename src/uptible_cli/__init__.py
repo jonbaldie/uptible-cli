@@ -3,6 +3,7 @@ import argparse
 import base64
 import hashlib
 import hmac
+import http.client
 import json
 import os
 from pathlib import Path
@@ -69,7 +70,7 @@ def request(url, form=None, bearer=None, method=None, _retry=True, payload=None,
             if exc.code == 422 and isinstance(payload, dict) and isinstance(payload.get("errors"), dict):
                 allowed = {"message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions", "revision"}
                 fields = sorted(allowed.intersection(payload["errors"]))
-        except (ValueError, OSError):
+        except (ValueError, OSError, http.client.HTTPException):
             pass
         message = f"Server rejected request (HTTP {exc.code})."
         if fields:
@@ -81,7 +82,7 @@ def request(url, form=None, bearer=None, method=None, _retry=True, payload=None,
         failure = Failure(code, message, 3)
         failure.http_status = exc.code
         raise failure from None
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError, http.client.HTTPException):
         raise Failure("network_error", "Server request failed or returned invalid JSON.", 3) from None
 
 def issuer_url(value):
