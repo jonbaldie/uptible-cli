@@ -1,4 +1,3 @@
-"""Local syntax discovery from the execution parser, without dispatch."""
 import argparse
 import os
 import re
