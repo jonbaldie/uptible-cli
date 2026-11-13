@@ -2,6 +2,10 @@
 
 Use `uptible` to connect an Uptible account from your terminal, check the connection, and view your account. This version also lets you disconnect and revoke the connection.
 
+## API compatibility
+
+CLI `0.1.0` targets `/api/v1` and requires server contract `1.1.0` or a compatible later `1.x` version. The [pinned OpenAPI candidate, operation mapping and support policy](docs/contracts/README.md) record the exact schema and its SHA-256. Public server publication and independent acceptance of this candidate are pending. This pin does not establish deployed compatibility or public availability.
+
 ## Install
 
 You need Python 3.11 or later and pip. From a checkout of this repository, create a virtual environment and install the CLI:
@@ -69,7 +73,7 @@ uptible installation show
 uptible notifications activity 1
 ```
 
-Use the returned ID and revision in place of the example values. Edit requires the current revision and a message. Omitted settings remain unchanged. If an edit conflicts, fetch the notification, review the current settings and revision, and decide whether to retry. Use `--help` on create or edit for configuration options. Activation, installation and activity require lifetime access. `deactivate`, `archive`, and `restore` are also available. Listing returns `next_after`; pass that value as `--after` for the next page.
+Use the returned ID and revision in place of the example values. Edit requires the current revision and a message. Omitted settings remain unchanged. If an edit conflicts, fetch the notification, review the current settings and revision, and decide whether to retry. Use `--help` on create or edit for configuration options. Activation, installation and activity require lifetime access. `deactivate`, `archive`, and `restore` are also available. Listing returns `next_after` and `previous_before`. Pass them as `--after` or `--before` for an explicit page. Use `--archived include`, `exclude` or `only` to filter archive visibility. Creation defaults to draft. Use `--state active` only when you intend immediate activation and have lifetime access.
 
 Existing connections made before these commands may lack their permissions. If a command returns HTTP 403, check lifetime access and the connection permissions.
 
@@ -174,7 +178,7 @@ After upgrading the installed CLI, rerun the generation command for your shell a
 | Review lifetime checkout | `uptible billing checkout` opens the browser review page |
 | Arbitrary statistics windows and time zones | Not supported by the server |
 
-The connection routes are experimental and may change before a public API contract is published. Browser actions have explicit continuity and completion limits in the [capability reference](docs/capabilities.md). Full contract coverage, server compatibility and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
+The CLI targets the pinned `1.1.0` contract candidate. Its public publication and real-server acceptance remain pending. Browser actions have explicit continuity and completion limits in the [capability reference](docs/capabilities.md). Full contract coverage, server compatibility and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
 
 ## Development
 
@@ -186,7 +190,7 @@ To build and verify the committed checkout as installable distributions, run:
 python3 scripts/verify-artifact.py /tmp/uptible-verified
 ```
 
-The output directory must be empty and the checkout clean. The command builds twice from the commit in independent environments with hashed build and runtime inputs from PyPI. It compares artifact hashes and selected dependency hashes, checks package file lists, installs the wheel, and runs all synthetic tests outside the checkout. It requires altered dependency bytes, an unexpected wheel member, an omitted completion command and broken generated shell code to fail verification. Install Bash and Zsh before running this gate. The artifacts include `BUILD_MANIFEST.json`, `SOURCE_REVISION`, `SHA256SUMS`, dependency reports, and negative-control logs. See [the release design](DESIGN.md#release-inputs-and-reproducibility) for the exact reproducibility claim and supported matrix. CI runs Python 3.11 through 3.14 on Linux. These checks do not establish operating-system keyring support or deployed-service compatibility. Remaining command coverage stays in issue #1.
+The output directory must be empty and the checkout clean. The command builds twice from the commit in independent environments with hashed build and runtime inputs from PyPI. It compares artifact hashes and selected dependency hashes, checks package file lists, installs the wheel, and runs all synthetic tests outside the checkout. It checks actual installed command requests against the pinned OpenAPI candidate and tests additive responses. It requires altered dependency bytes, an unexpected wheel member, an omitted completion command and broken generated shell code to fail verification. Install Bash and Zsh before running this gate. The artifacts include `BUILD_MANIFEST.json`, `SOURCE_REVISION`, `SHA256SUMS`, dependency reports, and negative-control logs. See [the release design](DESIGN.md#release-inputs-and-reproducibility) for the exact reproducibility claim and supported matrix. CI runs Python 3.11 through 3.14 on Linux. These checks do not establish operating-system keyring support or deployed-service compatibility. Remaining command coverage stays in issue #1.
 
 ## Release
 
@@ -243,6 +247,6 @@ UPTIBLE_TEST_ACCOUNT_ID=123 \
 python -m unittest discover -s tests -p test_integration.py -v
 ```
 
-The suite uses fresh temporary credentials and real system-browser OAuth. Sign in to the dedicated account and approve notification deletion with current-password proof in the browser. The suite verifies the returned account ID before it creates one uniquely named synthetic draft. It reads, archives, restores and deletes only that draft, then revokes its own connection. Existing credentials and unrelated notifications are untouched. A failed cleanup requires attention before rerunning.
+The suite uses fresh temporary credentials and real system-browser OAuth. Sign in to the dedicated account and approve notification deletion with current-password proof in the browser. The suite verifies the returned account ID and requires a compatible `Uptible-API-Version` header before it creates one uniquely named synthetic draft. It reads, archives, restores and deletes only that draft, then revokes its own connection. Existing credentials and unrelated notifications are untouched. A failed cleanup requires attention before rerunning.
 
 For a test account with lifetime access, add `UPTIBLE_TEST_LIFETIME_ACCESS=yes` to check lead, statistics and installation reads. The suite does not submit events, change account identity, close an account, initiate checkout or contact a payment provider. Browser email confirmation and payment outcomes require separate acceptance runs. The suite rejects the default production issuer, requires an explicit test issuer and skips entirely without the opt-in value. Default tests use synthetic local HTTP and OAuth fixtures.

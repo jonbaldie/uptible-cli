@@ -1,6 +1,6 @@
 # Command and browser capability reference
 
-The management API uses `/api/v1`. The prerelease CLI is awaiting a pinned, published contract and a declared minimum compatible server release. This table records implemented commands and browser boundaries; it does not claim complete contract compatibility.
+The management API uses `/api/v1`. CLI `0.1.0` pins contract candidate `1.1.0` as its minimum compatible semantic server contract. Public publication and independent acceptance remain pending. The [contract reference](contracts/README.md) maps every management operation ID to its command and records verification limits. This table records implemented commands and browser boundaries.
 
 | Capability | Command | Protocol and completion |
 | --- | --- | --- |
@@ -12,7 +12,7 @@ The management API uses `/api/v1`. The prerelease CLI is awaiting a pinned, publ
 | Confirm email update | `account confirm-email` | Opens `/billing`. The authenticated browser posts the recipient code and current password to `/account/oauth-email-change/confirm`. `account show` reads the resulting identity. |
 | Settings, connected clients and security | `account settings`, `account security` | Opens `/billing`. Password change, recovery, Google linking, connection revocation and closure remain browser actions. Closure requires password confirmation and soft-deletes the account; it is not a data purge. |
 | Onboarding | `account onboarding` | Opens `/onboarding`. Registration, sign-in, email verification and password reset use browser authentication routes. |
-| Notification configuration | `notifications list`, `show`, `create`, `edit` | Collection GET/POST and item GET/PUT under `/api/v1/notifications`. `edit` is the update command. Create uses a caller-selected idempotency key; edits require the current revision. |
+| Notification configuration | `notifications list`, `show`, `create`, `edit` | Collection GET/POST and item GET/PUT under `/api/v1/notifications`. `edit` is the update command. Create uses a caller-selected idempotency key and optional draft or active intent; edits require the current revision. Lists expose limit, before/after cursors and archive filters. |
 | Notification lifecycle | `notifications activate`, `deactivate`, `archive`, `restore` | Explicit target-state PUT on the selected notification action. |
 | Permanent notification deletion | `notifications delete ID` | Item DELETE, explicit confirmation and separately consented `notifications:delete`. Only HTTP 204 confirms deletion. |
 | Notification preview | `notifications preview ID` | Verifies API ownership, then opens `/notifications`. Find the item across pages and select Preview. The CLI cannot select the modal, bind the browser account or confirm rendering. |

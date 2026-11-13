@@ -1,0 +1,2289 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Uptible management API",
+    "version": "1.1.0",
+    "description": "OAuth management API. Availability depends on configuration; OAuth is disabled by default. Scope and access are separate: a scope never grants access to another account. See the management guides for activation and retry semantics. The Uptible-API-Version response header identifies this compatible v1 contract; see api-compatibility.md for client requirements and support policy."
+  },
+  "servers": [
+    {
+      "url": "https://uptible.com"
+    }
+  ],
+  "paths": {
+    "/api/v1/account": {
+      "get": {
+        "summary": "Read the current account",
+        "description": "",
+        "operationId": "get_api_v1_account",
+        "security": [
+          {
+            "oauth": [
+              "account:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                },
+                "example": {
+                  "id": 1,
+                  "name": "OAuth owner",
+                  "email": "oauth@example.test",
+                  "email_verified_at": null
+                }
+              }
+            },
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        }
+      }
+    },
+    "/api/v1/account/email-change": {
+      "post": {
+        "summary": "Request an email change",
+        "description": "Confirmation takes place in an authenticated website session.",
+        "operationId": "post_api_v1_account_email_change",
+        "security": [
+          {
+            "oauth": [
+              "account:email:write"
+            ]
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "confirmation_required"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                },
+                "example": {
+                  "status": "confirmation_required"
+                }
+              }
+            },
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              },
+              "example": {
+                "email": "new@example.test"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/logout": {
+      "post": {
+        "summary": "Revoke the current connection",
+        "description": "",
+        "operationId": "post_api_v1_logout",
+        "security": [
+          {
+            "oauth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success",
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        }
+      }
+    },
+    "/api/v1/billing": {
+      "get": {
+        "summary": "Read billing and lifetime access",
+        "description": "Each opaque cursor is account-bound and paginates its corresponding list. At most 20 entries per list. Reads use the primary database. The endpoint cannot initiate a payment or refund.",
+        "operationId": "get_api_v1_billing",
+        "security": [
+          {
+            "oauth": [
+              "billing:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Billing"
+                },
+                "example": {
+                  "live_access": false,
+                  "purchase_eligible": true,
+                  "latest_attempt": null,
+                  "pending_delivery": false,
+                  "claim_references": [],
+                  "next_claim_cursor": null,
+                  "has_orders": false,
+                  "orders": [],
+                  "next_cursor": null
+                }
+              }
+            },
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "claim_cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/installation": {
+      "get": {
+        "summary": "Read installation details",
+        "description": "Requires lifetime access.",
+        "operationId": "get_api_v1_installation",
+        "security": [
+          {
+            "oauth": [
+              "installation:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Installation"
+                },
+                "example": {
+                  "account": "oauth-owner",
+                  "embed_script_url": "https://uptible.com/js/embed.js",
+                  "snippet": "<script id=\"uptible-script\">window.uptible={acc:\"oauth-owner\"};window.addEventListener(\"load\",function(){var s=document.createElement(\"script\");s.async=true;s.src=\"https://uptible.com/js/embed.js?t=\"+Date.now();document.head.appendChild(s)});</script>",
+                  "latest_track_at": null
+                }
+              }
+            },
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        }
+      }
+    },
+    "/api/v1/statistics": {
+      "get": {
+        "summary": "Read dashboard statistics",
+        "description": "Requires lifetime access. Hour and day windows are inclusive at both ends and relative to as_of. Results may be cached for one second. Capture counts cover active non-archived notifications; tracks include historical tracks for the account.",
+        "operationId": "get_api_v1_statistics",
+        "security": [
+          {
+            "oauth": [
+              "statistics:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Statistics"
+                },
+                "example": {
+                  "hour_captures_count": 0,
+                  "captures_count": 0,
+                  "all_captures_count": 2,
+                  "tracks_count": 0,
+                  "as_of": "2026-11-11T19:06:04+00:00",
+                  "hour_start": "2026-11-11T18:06:04+00:00",
+                  "day_start": "2026-11-10T19:06:04+00:00"
+                }
+              }
+            },
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        }
+      }
+    },
+    "/api/v1/leads": {
+      "get": {
+        "summary": "List owned leads",
+        "description": "Dates are UTC YYYY-MM-DD; from is inclusive and until exclusive. Opaque cursor is bound to account and filters. Requires lifetime access. Results order by creation time and ID descending; later pages can shorten after deletion, and new records require a fresh listing.",
+        "operationId": "get_api_v1_leads",
+        "security": [
+          {
+            "oauth": [
+              "leads:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Lead"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                },
+                "example": {
+                  "data": [
+                    {
+                      "id": 2,
+                      "notification_id": 2,
+                      "name": "Second lead",
+                      "location": null,
+                      "city": null,
+                      "region": null,
+                      "country": null,
+                      "created_at": "2026-01-01T12:00:00+00:00"
+                    }
+                  ],
+                  "next_cursor": "eyJpdiI6ImdORUJlZ0s2WVg5NjZYUzZlL3owUmc9PSIsInZhbHVlIjoic2JiMkpDc2RybFFIOGs5eEgzYTBZYmFwWDNKeTQ0RHJDTm1KSXk5OW9kZyt1b1I0K2dQVGhycWs1c2xrY01ncERuQ2ZNeXp6RndYdDhvRVQrdmYyNFE3VFpLNVFPUG5pY2pnRHMzOEpVbEk9IiwibWFjIjoiZGUzNTJjMTQ4M2I5OTFlOWU4YjAwYmE1NjY1NTAzNGY4MDVmZTA3NTAwYzc2ODgzNGNjM2NmZGVmOWQwM2FhYSIsInRhZyI6IiJ9"
+                }
+              }
+            },
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "notification_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/leads/{id}": {
+      "get": {
+        "summary": "Read a lead",
+        "description": "Requires lifetime access.",
+        "operationId": "get_api_v1_leads_id",
+        "security": [
+          {
+            "oauth": [
+              "leads:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Lead"
+                },
+                "example": {
+                  "id": 1,
+                  "notification_id": 2,
+                  "name": "First lead",
+                  "location": null,
+                  "city": null,
+                  "region": null,
+                  "country": null,
+                  "created_at": "2026-01-01T12:00:00+00:00"
+                }
+              }
+            },
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ]
+      },
+      "delete": {
+        "summary": "Permanently delete a lead",
+        "description": "Permanently deletes an owned stored lead, including archived notifications and after lifetime access ends. First-party sessions require CSRF. Any present Authorization header exclusively selects OAuth. A repeated delete returns 404. Reload the website only after observing 204.",
+        "operationId": "delete_api_v1_leads_id",
+        "security": [
+          {
+            "oauth": [
+              "leads:delete"
+            ]
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success",
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "419": {
+            "$ref": "#/components/responses/Error419"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "X-CSRF-TOKEN",
+            "in": "header",
+            "required": false,
+            "description": "Required for first-party session mutations; omitted for OAuth bearer requests. Obtain from the signed-in website csrf-token meta element.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/notifications": {
+      "get": {
+        "summary": "List notifications",
+        "description": "Owned notifications in ascending ID order, archived records included by default. Use mutually exclusive after/before cursors for bounded forward/backward navigation. next_after and previous_before are null at their respective ends. The website uses this same query/resource with limit=10.",
+        "operationId": "get_api_v1_notifications",
+        "security": [
+          {
+            "oauth": [
+              "notifications:read"
+            ]
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Notification"
+                      }
+                    },
+                    "next_after": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "previous_before": {
+                      "type": "integer",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_after",
+                    "previous_before"
+                  ]
+                },
+                "example": {
+                  "data": [
+                    {
+                      "id": 1,
+                      "state": "draft",
+                      "revision": 1,
+                      "message": "Owned draft",
+                      "url_capture": "",
+                      "url_display": "",
+                      "display_maps_only": 0,
+                      "custom_delay_x_seconds": 6,
+                      "display_last_x_conversions": 20,
+                      "updated_at": "2026-11-13T12:00:00+00:00"
+                    }
+                  ],
+                  "next_after": null,
+                  "previous_before": null
+                }
+              }
+            },
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "Exclusive lower ID bound. Cannot be combined with before."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "Exclusive upper ID bound, returning the nearest preceding page in ascending order. Cannot be combined with after.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "include",
+                "exclude",
+                "only"
+              ],
+              "default": "include"
+            }
+          }
+        ]
+      },
+      "post": {
+        "summary": "Create a notification with explicit draft or active intent",
+        "description": "Defaults to draft. Explicit state=active requires current lifetime access. Same account, key and input returns the existing notification; changed input or creation intent conflicts. Keys remain reserved after deletion. An identical uncertain retry must retain its key; a deliberate payload/intent change must use a fresh key.",
+        "operationId": "post_api_v1_notifications",
+        "security": [
+          {
+            "oauth": [
+              "notifications:write"
+            ]
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Notification"
+                },
+                "example": {
+                  "id": 2,
+                  "state": "draft",
+                  "revision": 1,
+                  "message": "Client draft",
+                  "url_capture": "https://example.test/form",
+                  "url_display": "",
+                  "display_maps_only": 0,
+                  "custom_delay_x_seconds": 6,
+                  "display_last_x_conversions": 20,
+                  "updated_at": "2026-11-13T12:00:00+00:00"
+                }
+              }
+            },
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "419": {
+            "$ref": "#/components/responses/Error419"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CSRF-TOKEN",
+            "in": "header",
+            "required": false,
+            "description": "Required for first-party session mutations; omitted for OAuth bearer requests. Obtain from the signed-in website csrf-token meta element.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationCreateInput"
+              },
+              "example": {
+                "message": "Client draft",
+                "url_capture": "https://example.test/form"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notifications/{id}": {
+      "get": {
+        "summary": "Read a notification",
+        "description": "",
+        "operationId": "get_api_v1_notifications_id",
+        "security": [
+          {
+            "oauth": [
+              "notifications:read"
+            ]
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Notification"
+                },
+                "example": {
+                  "id": 2,
+                  "state": "draft",
+                  "revision": 1,
+                  "message": "Client draft",
+                  "url_capture": "https://example.test/form",
+                  "url_display": "",
+                  "display_maps_only": 0,
+                  "custom_delay_x_seconds": 6,
+                  "display_last_x_conversions": 20,
+                  "updated_at": "2026-11-13T12:00:00+00:00"
+                }
+              }
+            },
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ]
+      },
+      "put": {
+        "summary": "Edit a notification",
+        "description": "Provide the current revision. Omitted settings are retained; stale edits conflict.",
+        "operationId": "put_api_v1_notifications_id",
+        "security": [
+          {
+            "oauth": [
+              "notifications:write"
+            ]
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Notification"
+                },
+                "example": {
+                  "id": 2,
+                  "state": "draft",
+                  "revision": 2,
+                  "message": "Client edit",
+                  "url_capture": "https://example.test/edited",
+                  "url_display": "",
+                  "display_maps_only": 0,
+                  "custom_delay_x_seconds": 6,
+                  "display_last_x_conversions": 20,
+                  "updated_at": "2026-11-13T12:00:00+00:00"
+                }
+              }
+            },
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "419": {
+            "$ref": "#/components/responses/Error419"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "X-CSRF-TOKEN",
+            "in": "header",
+            "required": false,
+            "description": "Required for first-party session mutations; omitted for OAuth bearer requests. Obtain from the signed-in website csrf-token meta element.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "description": "Updates store the message up to 191 code points and do not apply the 50-code-point create cut. The TrimStrings middleware removes leading and trailing whitespace and invisible characters (Laravel Str::trim), unless the submitted message exactly matches the stored message. An unchanged message is kept as stored."
+                  },
+                  "url_capture": {
+                    "type": "string"
+                  },
+                  "url_display": {
+                    "type": "string"
+                  },
+                  "display_maps_only": {
+                    "type": "integer"
+                  },
+                  "custom_delay_x_seconds": {
+                    "type": "integer",
+                    "minimum": 5,
+                    "maximum": 30
+                  },
+                  "display_last_x_conversions": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "message",
+                  "revision"
+                ]
+              },
+              "example": {
+                "revision": 1,
+                "message": "Client edit",
+                "url_capture": "https://example.test/edited"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Permanently delete a notification",
+        "description": "",
+        "operationId": "delete_api_v1_notifications_id",
+        "security": [
+          {
+            "oauth": [
+              "notifications:delete"
+            ]
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success",
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "419": {
+            "$ref": "#/components/responses/Error419"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "X-CSRF-TOKEN",
+            "in": "header",
+            "required": false,
+            "description": "Required for first-party session mutations; omitted for OAuth bearer requests. Obtain from the signed-in website csrf-token meta element.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/notifications/{id}/{target}": {
+      "put": {
+        "summary": "Change notification state",
+        "description": "Activation requires lifetime access. Repeating an already applied transition does not change revision.",
+        "operationId": "put_api_v1_notifications_id_target",
+        "security": [
+          {
+            "oauth": [
+              "notifications:write"
+            ]
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Notification"
+                },
+                "example": {
+                  "id": 2,
+                  "state": "active",
+                  "revision": 3,
+                  "message": "Client edit",
+                  "url_capture": "https://example.test/edited",
+                  "url_display": "",
+                  "display_maps_only": 0,
+                  "custom_delay_x_seconds": 6,
+                  "display_last_x_conversions": 20,
+                  "updated_at": "2026-11-13T12:00:00+00:00"
+                }
+              }
+            },
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "419": {
+            "$ref": "#/components/responses/Error419"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "target",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "activate",
+                "deactivate",
+                "archive",
+                "restore"
+              ]
+            }
+          },
+          {
+            "name": "X-CSRF-TOKEN",
+            "in": "header",
+            "required": false,
+            "description": "Required for first-party session mutations; omitted for OAuth bearer requests. Obtain from the signed-in website csrf-token meta element.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/notifications/{id}/activity": {
+      "get": {
+        "summary": "Read notification activity",
+        "description": "Requires lifetime access and a non-archived owned notification.",
+        "operationId": "get_api_v1_notifications_id_activity",
+        "security": [
+          {
+            "oauth": [
+              "activity:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Activity"
+                },
+                "example": {
+                  "notification_id": 2,
+                  "captures": 2,
+                  "tracks": 1,
+                  "latest_track_at": "2026-11-11T19:06:04+00:00"
+                }
+              }
+            },
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/notifications/{id}/capture": {
+      "post": {
+        "summary": "Submit capture event",
+        "description": "Requires a live owned notification and lifetime access. Reuse session_id and event_id with identical input for retries; processing is synchronous. Email is normalized before replay comparison; changing a capture under the same identity conflicts.",
+        "operationId": "post_api_v1_notifications_id_capture",
+        "security": [
+          {
+            "oauth": [
+              "events:write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                },
+                "example": {
+                  "receipt": "0b8b7775-c080-4ecd-8cff-ee9571bf9ed2",
+                  "status": "processed"
+                }
+              }
+            },
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Capture"
+              },
+              "example": {
+                "session_id": "session-1",
+                "event_id": "event-1",
+                "email": "visitor@example.test",
+                "name": "Synthetic Person"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notifications/{id}/track": {
+      "post": {
+        "summary": "Submit track event",
+        "description": "Requires a live owned notification and lifetime access. Reuse session_id and event_id with identical input for retries; processing is synchronous. A tracking replay refreshes visitor presence.",
+        "operationId": "post_api_v1_notifications_id_track",
+        "security": [
+          {
+            "oauth": [
+              "events:write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                },
+                "example": {
+                  "receipt": "c6311f4d-375b-4138-8075-85ca8930ee1e",
+                  "status": "processed"
+                }
+              }
+            },
+            "headers": {
+              "Uptible-API-Version": {
+                "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+                },
+                "example": "1.1.0"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Event"
+              },
+              "example": {
+                "session_id": "session-1",
+                "event_id": "track-1"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "oauth": {
+        "type": "oauth2",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://uptible.com/oauth/authorize",
+            "tokenUrl": "https://uptible.com/oauth/token",
+            "scopes": {
+              "account:read": "account:read",
+              "account:email:write": "account:email:write",
+              "billing:read": "billing:read",
+              "installation:read": "installation:read",
+              "statistics:read": "statistics:read",
+              "leads:read": "leads:read",
+              "leads:delete": "leads:delete",
+              "notifications:read": "notifications:read",
+              "notifications:write": "notifications:write",
+              "notifications:delete": "notifications:delete",
+              "activity:read": "activity:read",
+              "events:write": "events:write"
+            }
+          }
+        }
+      },
+      "session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "uptible_session",
+        "description": "First-party same-origin authenticated website session; cookie name follows server configuration. Mutations require the session X-CSRF-TOKEN header. Supported by notification management operations and DELETE /api/v1/leads/{id}. Lead GET operations remain OAuth-only. Any present Authorization header selects OAuth exclusively, including empty or whitespace values."
+      }
+    },
+    "schemas": {
+      "Problem": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "code": {
+            "type": "string"
+          },
+          "correlation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "errors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "code",
+          "correlation_id"
+        ]
+      },
+      "Account": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "email_verified_at": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email",
+          "email_verified_at"
+        ]
+      },
+      "Notification": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "inactive",
+              "archived"
+            ]
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "url_capture": {
+            "type": "string"
+          },
+          "url_display": {
+            "type": "string"
+          },
+          "display_maps_only": {
+            "type": "integer"
+          },
+          "custom_delay_x_seconds": {
+            "type": "integer"
+          },
+          "display_last_x_conversions": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "revision",
+          "message",
+          "url_capture",
+          "url_display",
+          "display_maps_only",
+          "custom_delay_x_seconds",
+          "display_last_x_conversions",
+          "updated_at"
+        ]
+      },
+      "NotificationInput": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Required message. The TrimStrings middleware first removes leading and trailing whitespace and invisible characters (Laravel Str::trim: Unicode whitespace, zero width and joiner characters, soft hyphen, BOM, and similar). Creation stores the longest prefix of whole extended grapheme clusters within 50 Unicode code points. If the first cluster alone exceeds 50 code points, creation stores that cluster up to 191 code points and drops any following text. A first cluster longer than 191 code points is cut at a code-point boundary and may be split. A message of 50 code points or fewer is stored as trimmed. JSON containing invalid UTF-8 receives a 422 validation error. Updates have a separate 191-code-point limit and do not apply the create cut."
+          },
+          "url_capture": {
+            "type": "string"
+          },
+          "url_display": {
+            "type": "string"
+          },
+          "display_maps_only": {
+            "type": "integer"
+          },
+          "custom_delay_x_seconds": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 30
+          },
+          "display_last_x_conversions": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "Lead": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "notification_id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "location": {
+            "type": "string",
+            "nullable": true
+          },
+          "city": {
+            "type": "string",
+            "nullable": true
+          },
+          "region": {
+            "type": "string",
+            "nullable": true
+          },
+          "country": {
+            "type": "string",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "notification_id",
+          "name",
+          "location",
+          "city",
+          "region",
+          "country",
+          "created_at"
+        ]
+      },
+      "Event": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1
+          },
+          "event_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1
+          }
+        },
+        "required": [
+          "session_id",
+          "event_id"
+        ],
+        "additionalProperties": false
+      },
+      "Capture": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1
+          },
+          "event_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 254
+          },
+          "name": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 255
+          }
+        },
+        "required": [
+          "session_id",
+          "event_id",
+          "email"
+        ],
+        "additionalProperties": false
+      },
+      "Receipt": {
+        "type": "object",
+        "properties": {
+          "receipt": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "processed"
+            ]
+          }
+        },
+        "required": [
+          "receipt",
+          "status"
+        ]
+      },
+      "Activity": {
+        "type": "object",
+        "properties": {
+          "notification_id": {
+            "type": "integer"
+          },
+          "captures": {
+            "type": "integer"
+          },
+          "tracks": {
+            "type": "integer"
+          },
+          "latest_track_at": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "notification_id",
+          "captures",
+          "tracks",
+          "latest_track_at"
+        ]
+      },
+      "Installation": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "embed_script_url": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "latest_track_at": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "account",
+          "embed_script_url",
+          "snippet",
+          "latest_track_at"
+        ]
+      },
+      "Statistics": {
+        "type": "object",
+        "properties": {
+          "hour_captures_count": {
+            "type": "integer"
+          },
+          "captures_count": {
+            "type": "integer"
+          },
+          "all_captures_count": {
+            "type": "integer"
+          },
+          "tracks_count": {
+            "type": "integer"
+          },
+          "as_of": {
+            "type": "string"
+          },
+          "hour_start": {
+            "type": "string"
+          },
+          "day_start": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "hour_captures_count",
+          "captures_count",
+          "all_captures_count",
+          "tracks_count",
+          "as_of",
+          "hour_start",
+          "day_start"
+        ]
+      },
+      "Billing": {
+        "type": "object",
+        "properties": {
+          "live_access": {
+            "type": "boolean"
+          },
+          "purchase_eligible": {
+            "type": "boolean"
+          },
+          "latest_attempt": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "status": {
+                "type": "string"
+              },
+              "order_number": {
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "required": [
+              "id",
+              "status",
+              "order_number"
+            ]
+          },
+          "pending_delivery": {
+            "type": "boolean"
+          },
+          "has_orders": {
+            "type": "boolean"
+          },
+          "orders": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "order_number": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "refunded_amount": {
+                  "type": "integer"
+                },
+                "duplicate_refund": {
+                  "type": "string",
+                  "nullable": true,
+                  "enum": [
+                    "pending",
+                    "submitted",
+                    "error",
+                    null
+                  ]
+                }
+              },
+              "required": [
+                "order_number",
+                "refunded_amount",
+                "duplicate_refund"
+              ]
+            }
+          },
+          "claim_references": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "next_cursor": {
+            "type": "string",
+            "nullable": true
+          },
+          "next_claim_cursor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "live_access",
+          "purchase_eligible",
+          "latest_attempt",
+          "pending_delivery",
+          "has_orders",
+          "orders",
+          "claim_references",
+          "next_cursor",
+          "next_claim_cursor"
+        ]
+      },
+      "NotificationCreateInput": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/NotificationInput"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "draft",
+                  "active"
+                ],
+                "default": "draft",
+                "description": "Creation intent. Active requires current lifetime access. The paid website explicitly requests active; unpaid users can create only draft."
+              }
+            }
+          }
+        ]
+      }
+    },
+    "responses": {
+      "Error401": {
+        "description": "Request failed; see management errors.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            },
+            "example": {
+              "type": "about:blank",
+              "title": "Unauthorized",
+              "status": 401,
+              "code": "unauthenticated",
+              "correlation_id": "83bdf1e7-3df4-4f0c-95b0-c03f4ac4feaf"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "description": "Server-generated correlation ID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "WWW-Authenticate": {
+            "description": "Bearer authentication challenge.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "Uptible-API-Version": {
+            "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+            "schema": {
+              "type": "string",
+              "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+            },
+            "example": "1.1.0"
+          }
+        }
+      },
+      "Error403": {
+        "description": "Request failed; see management errors.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            },
+            "example": {
+              "type": "about:blank",
+              "title": "Forbidden",
+              "status": 403,
+              "code": "forbidden",
+              "correlation_id": "261e44dd-b76d-46bc-898a-e47c3905431b"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "description": "Server-generated correlation ID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "Uptible-API-Version": {
+            "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+            "schema": {
+              "type": "string",
+              "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+            },
+            "example": "1.1.0"
+          }
+        }
+      },
+      "Error429": {
+        "description": "Request failed; see management errors.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "description": "Server-generated correlation ID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "Retry-After": {
+            "description": "Delay in seconds or HTTP date when supplied.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "Uptible-API-Version": {
+            "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+            "schema": {
+              "type": "string",
+              "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+            },
+            "example": "1.1.0"
+          }
+        }
+      },
+      "Error500": {
+        "description": "Request failed; see management errors.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "description": "Server-generated correlation ID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "Uptible-API-Version": {
+            "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+            "schema": {
+              "type": "string",
+              "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+            },
+            "example": "1.1.0"
+          }
+        }
+      },
+      "Error422": {
+        "description": "Request failed; see management errors.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            },
+            "example": {
+              "type": "about:blank",
+              "title": "Unprocessable Content",
+              "status": 422,
+              "code": "validation_error",
+              "correlation_id": "f1e17616-24ef-4135-b845-0756e116ae64",
+              "errors": {
+                "cursor": [
+                  "Invalid value."
+                ]
+              }
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "description": "Server-generated correlation ID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "Uptible-API-Version": {
+            "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+            "schema": {
+              "type": "string",
+              "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+            },
+            "example": "1.1.0"
+          }
+        }
+      },
+      "Error404": {
+        "description": "Request failed; see management errors.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            },
+            "example": {
+              "type": "about:blank",
+              "title": "Not Found",
+              "status": 404,
+              "code": "not_found",
+              "correlation_id": "ab5f7c4b-2410-4d0e-bd31-bc833a96a8c6"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "description": "Server-generated correlation ID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "Uptible-API-Version": {
+            "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+            "schema": {
+              "type": "string",
+              "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+            },
+            "example": "1.1.0"
+          }
+        }
+      },
+      "Error409": {
+        "description": "Request failed; see management errors.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            },
+            "example": {
+              "type": "about:blank",
+              "title": "Conflict",
+              "status": 409,
+              "code": "conflict",
+              "correlation_id": "20c5394d-daf0-4ce4-87aa-9631db1fc654"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "description": "Server-generated correlation ID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "Uptible-API-Version": {
+            "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+            "schema": {
+              "type": "string",
+              "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+            },
+            "example": "1.1.0"
+          }
+        }
+      },
+      "Error419": {
+        "description": "Session CSRF validation failed. Preserve entered values before signing in or reloading.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            },
+            "example": {
+              "type": "about:blank",
+              "title": "Unknown Status",
+              "status": 419,
+              "code": "csrf_mismatch",
+              "correlation_id": "c12204b3-55a1-4ed9-b132-f79089afc446"
+            }
+          }
+        },
+        "headers": {
+          "Uptible-API-Version": {
+            "description": "Implemented v1 contract semantic version. Clients ignore unknown response fields and use named capabilities only after checking their minimum contract version.",
+            "schema": {
+              "type": "string",
+              "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+            },
+            "example": "1.1.0"
+          }
+        }
+      }
+    }
+  }
+}

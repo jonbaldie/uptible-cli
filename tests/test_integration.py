@@ -5,10 +5,27 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import re
+import urllib.error
+import urllib.request
 import unittest
 from unittest import mock
 import urllib.parse
 import uuid
+
+
+def require_server_contract(issuer):
+    from uptible_cli import OPENER
+
+    request = urllib.request.Request(issuer + "/api/v1/account", headers={"Accept": "application/json"})
+    try:
+        response = OPENER.open(request, timeout=15)
+    except urllib.error.HTTPError as error:
+        response = error
+    with response:
+        version = response.headers.get("Uptible-API-Version", "")
+    if not re.fullmatch(r"1\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version) or tuple(map(int, version.split("."))) < (1, 1, 0):
+        raise AssertionError("Test server must advertise a compatible Uptible-API-Version of at least 1.1.0 before draft mutations")
 
 
 class IntegrationTargetGuard(unittest.TestCase):
@@ -95,6 +112,7 @@ class ActualAccount(unittest.TestCase):
                 connected = True
                 self.assertEqual(login['account']['id'], expected, 'Unexpected test account')
                 self.assertEqual(command('account', 'show')['id'], expected)
+                require_server_contract(issuer)
                 key = 'integration-' + uuid.uuid4().hex
                 message = 'Synthetic draft ' + uuid.uuid4().hex
                 draft = command('notifications', 'create', '--idempotency-key', key, '--message', message)

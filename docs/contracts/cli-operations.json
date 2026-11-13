@@ -1,0 +1,384 @@
+[
+  {
+    "operation_id": "get_api_v1_account",
+    "method": "GET",
+    "path": "/api/v1/account",
+    "command": [
+      "account",
+      "show"
+    ],
+    "scopes": [
+      "account:read"
+    ],
+    "query": {},
+    "body": null,
+    "headers": {}
+  },
+  {
+    "operation_id": "post_api_v1_account_email_change",
+    "method": "POST",
+    "path": "/api/v1/account/email-change",
+    "command": [
+      "account",
+      "update",
+      "--email",
+      "new@example.test"
+    ],
+    "scopes": [
+      "account:email:write"
+    ],
+    "query": {},
+    "body": {
+      "email": "new@example.test"
+    },
+    "headers": {}
+  },
+  {
+    "operation_id": "post_api_v1_logout",
+    "method": "POST",
+    "path": "/api/v1/logout",
+    "command": [
+      "auth",
+      "logout"
+    ],
+    "scopes": [],
+    "query": {},
+    "body": null,
+    "headers": {}
+  },
+  {
+    "operation_id": "get_api_v1_billing",
+    "method": "GET",
+    "path": "/api/v1/billing",
+    "command": [
+      "billing",
+      "status",
+      "--cursor",
+      "order-next",
+      "--claim-cursor",
+      "claim-next"
+    ],
+    "scopes": [
+      "billing:read"
+    ],
+    "query": {
+      "cursor": "order-next",
+      "claim_cursor": "claim-next"
+    },
+    "body": null,
+    "headers": {}
+  },
+  {
+    "operation_id": "get_api_v1_installation",
+    "method": "GET",
+    "path": "/api/v1/installation",
+    "command": [
+      "installation",
+      "show"
+    ],
+    "scopes": [
+      "installation:read"
+    ],
+    "query": {},
+    "body": null,
+    "headers": {}
+  },
+  {
+    "operation_id": "get_api_v1_statistics",
+    "method": "GET",
+    "path": "/api/v1/statistics",
+    "command": [
+      "stats",
+      "show"
+    ],
+    "scopes": [
+      "statistics:read"
+    ],
+    "query": {},
+    "body": null,
+    "headers": {}
+  },
+  {
+    "operation_id": "get_api_v1_leads",
+    "method": "GET",
+    "path": "/api/v1/leads",
+    "command": [
+      "leads",
+      "list",
+      "--limit",
+      "3",
+      "--notification-id",
+      "7",
+      "--from",
+      "2026-01-01",
+      "--until",
+      "2026-02-01",
+      "--cursor",
+      "lead-next"
+    ],
+    "scopes": [
+      "leads:read"
+    ],
+    "query": {
+      "limit": 3,
+      "notification_id": 7,
+      "from": "2026-01-01",
+      "until": "2026-02-01",
+      "cursor": "lead-next"
+    },
+    "body": null,
+    "headers": {}
+  },
+  {
+    "operation_id": "get_api_v1_leads_id",
+    "method": "GET",
+    "path": "/api/v1/leads/{id}",
+    "command": [
+      "leads",
+      "show",
+      "7"
+    ],
+    "scopes": [
+      "leads:read"
+    ],
+    "query": {},
+    "body": null,
+    "headers": {}
+  },
+  {
+    "operation_id": "delete_api_v1_leads_id",
+    "method": "DELETE",
+    "path": "/api/v1/leads/{id}",
+    "command": [
+      "leads",
+      "delete",
+      "7",
+      "--yes"
+    ],
+    "scopes": [
+      "leads:delete"
+    ],
+    "query": {},
+    "body": null,
+    "headers": {}
+  },
+  {
+    "operation_id": "get_api_v1_notifications",
+    "method": "GET",
+    "path": "/api/v1/notifications",
+    "command": [
+      "notifications",
+      "list",
+      "--limit",
+      "3",
+      "--before",
+      "9",
+      "--archived",
+      "only"
+    ],
+    "scopes": [
+      "notifications:read"
+    ],
+    "query": {
+      "limit": 3,
+      "before": 9,
+      "archived": "only"
+    },
+    "body": null,
+    "headers": {}
+  },
+  {
+    "operation_id": "post_api_v1_notifications",
+    "method": "POST",
+    "path": "/api/v1/notifications",
+    "command": [
+      "notifications",
+      "create",
+      "--idempotency-key",
+      "synthetic-create",
+      "--state",
+      "active",
+      "--message",
+      "Synthetic draft",
+      "--url-capture",
+      "https://example.test/form",
+      "--url-display",
+      "https://example.test",
+      "--display-maps-only",
+      "--custom-delay-x-seconds",
+      "5",
+      "--display-last-x-conversions",
+      "10"
+    ],
+    "scopes": [
+      "notifications:write"
+    ],
+    "query": {},
+    "body": {
+      "message": "Synthetic draft",
+      "url_capture": "https://example.test/form",
+      "url_display": "https://example.test",
+      "display_maps_only": 1,
+      "custom_delay_x_seconds": 5,
+      "display_last_x_conversions": 10,
+      "state": "active"
+    },
+    "headers": {
+      "Idempotency-Key": "synthetic-create"
+    }
+  },
+  {
+    "operation_id": "get_api_v1_notifications_id",
+    "method": "GET",
+    "path": "/api/v1/notifications/{id}",
+    "command": [
+      "notifications",
+      "show",
+      "7"
+    ],
+    "scopes": [
+      "notifications:read"
+    ],
+    "query": {},
+    "body": null,
+    "headers": {}
+  },
+  {
+    "operation_id": "put_api_v1_notifications_id",
+    "method": "PUT",
+    "path": "/api/v1/notifications/{id}",
+    "command": [
+      "notifications",
+      "edit",
+      "7",
+      "--revision",
+      "2",
+      "--message",
+      "Synthetic draft",
+      "--url-capture",
+      "https://example.test/form",
+      "--url-display",
+      "https://example.test",
+      "--display-maps-only",
+      "--custom-delay-x-seconds",
+      "5",
+      "--display-last-x-conversions",
+      "10"
+    ],
+    "scopes": [
+      "notifications:write"
+    ],
+    "query": {},
+    "body": {
+      "message": "Synthetic draft",
+      "url_capture": "https://example.test/form",
+      "url_display": "https://example.test",
+      "display_maps_only": 1,
+      "custom_delay_x_seconds": 5,
+      "display_last_x_conversions": 10,
+      "revision": 2
+    },
+    "headers": {}
+  },
+  {
+    "operation_id": "delete_api_v1_notifications_id",
+    "method": "DELETE",
+    "path": "/api/v1/notifications/{id}",
+    "command": [
+      "notifications",
+      "delete",
+      "7",
+      "--yes"
+    ],
+    "scopes": [
+      "notifications:delete"
+    ],
+    "query": {},
+    "body": null,
+    "headers": {}
+  },
+  {
+    "operation_id": "put_api_v1_notifications_id_target",
+    "method": "PUT",
+    "path": "/api/v1/notifications/{id}/{target}",
+    "command": [
+      "notifications",
+      "activate",
+      "7"
+    ],
+    "scopes": [
+      "notifications:write"
+    ],
+    "query": {},
+    "body": {},
+    "headers": {}
+  },
+  {
+    "operation_id": "get_api_v1_notifications_id_activity",
+    "method": "GET",
+    "path": "/api/v1/notifications/{id}/activity",
+    "command": [
+      "notifications",
+      "activity",
+      "7"
+    ],
+    "scopes": [
+      "activity:read"
+    ],
+    "query": {},
+    "body": null,
+    "headers": {}
+  },
+  {
+    "operation_id": "post_api_v1_notifications_id_capture",
+    "method": "POST",
+    "path": "/api/v1/notifications/{id}/capture",
+    "command": [
+      "events",
+      "capture",
+      "7",
+      "--session-id",
+      "session-1",
+      "--event-id",
+      "capture-1",
+      "--email",
+      "visitor@example.test",
+      "--name",
+      "Synthetic Person"
+    ],
+    "scopes": [
+      "events:write"
+    ],
+    "query": {},
+    "body": {
+      "session_id": "session-1",
+      "event_id": "capture-1",
+      "email": "visitor@example.test",
+      "name": "Synthetic Person"
+    },
+    "headers": {}
+  },
+  {
+    "operation_id": "post_api_v1_notifications_id_track",
+    "method": "POST",
+    "path": "/api/v1/notifications/{id}/track",
+    "command": [
+      "events",
+      "track",
+      "7",
+      "--session-id",
+      "session-1",
+      "--event-id",
+      "track-1"
+    ],
+    "scopes": [
+      "events:write"
+    ],
+    "query": {},
+    "body": {
+      "session_id": "session-1",
+      "event_id": "track-1"
+    },
+    "headers": {}
+  }
+]
