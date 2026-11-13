@@ -19,7 +19,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 WHEEL_FILES = {'uptible_cli/__init__.py', 'uptible_cli/__main__.py', 'uptible_cli/completion.py'}
 DIST_INFO = re.compile(r'uptible_cli-[^/]+\.dist-info/(METADATA|WHEEL|entry_points.txt|top_level.txt|RECORD)')
-SOURCE_FILES = {'PKG-INFO', 'README.md', 'pyproject.toml', 'setup.cfg',
+SOURCE_FILES = {'PKG-INFO', 'README.md', 'DESIGN.md', 'CHANGELOG.md', 'docs/capabilities.md', 'pyproject.toml', 'setup.cfg',
                 'src/uptible_cli/__init__.py', 'src/uptible_cli/__main__.py', 'src/uptible_cli/completion.py',
                 'src/uptible_cli.egg-info/PKG-INFO', 'src/uptible_cli.egg-info/SOURCES.txt',
                 'src/uptible_cli.egg-info/dependency_links.txt', 'src/uptible_cli.egg-info/entry_points.txt',
@@ -81,6 +81,7 @@ def normalize_sdist(path, epoch):
         files = {m.name.split('/', 1)[1] for m in members if m.isfile() and '/' in m.name}
         if (len(roots) != 1 or not files <= SOURCE_FILES
                 or not {'pyproject.toml', 'src/uptible_cli/__init__.py', 'tests/test_contract.py',
+                        'DESIGN.md', 'CHANGELOG.md', 'docs/capabilities.md',
                         'docs/contracts/manifest.json', 'docs/contracts/v1.1.0.json',
                         'docs/contracts/cli-operations.json', 'docs/contracts/README.md'} <= files
                 or any('..' in Path(m.name).parts or m.name.startswith('/') for m in members)):
