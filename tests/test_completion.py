@@ -170,7 +170,7 @@ sys.exit(uptible_cli.main())
         if shell == 'bash':
             command = f'source "$1"\n[[ $(complete -p uptible) == *"_uptible_complete"* ]] || exit 7\nCOMP_WORDS=({array})\nCOMP_CWORD={len(words) - 1}\nCOMP_LINE={shlex.quote(line)}\nCOMP_POINT={len(line.encode())}\n_uptible_complete\nprintf "%s\\n" "${{COMPREPLY[@]}}"'
         else:
-            command = f'autoload -Uz compinit\ncompinit -D\n[[ -z $_comps[uptible-untrusted] ]] || exit 8\nsource "$1"\n[[ $_comps[uptible] == _uptible_complete ]] || exit 7\ncompadd() {{ shift; printf "%s\\n" "$@"; }}\nwords=({array})\nCURRENT={len(words)}\n_uptible_complete'
+            command = f'autoload -Uz compinit\ncompinit -i -D\n[[ -z $_comps[uptible-untrusted] ]] || exit 8\nsource "$1"\n[[ $_comps[uptible] == _uptible_complete ]] || exit 7\ncompadd() {{ shift; printf "%s\\n" "$@"; }}\nwords=({array})\nCURRENT={len(words)}\n_uptible_complete'
         result = subprocess.run([shell, '-f' if shell == 'zsh' else '--noprofile', '-c', command, 'test', str(script)],
                                 text=True, capture_output=True, cwd=cwd, env=env, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
