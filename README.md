@@ -141,7 +141,7 @@ Exit codes are `0` for success, `2` for usage or configuration errors, `3` for s
 | Read lifetime billing | `uptible billing status` |
 | Modify an account, view broader statistics, or initiate checkout | Not implemented |
 
-The connection routes are experimental and may change before a public API contract is published. Checkout and other account operations are not implemented. Full command coverage, server compatibility, reproducible release dependencies and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
+The connection routes are experimental and may change before a public API contract is published. Checkout and other account operations are not implemented. Full command coverage, server compatibility, distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
 
 ## Development
 
@@ -153,10 +153,26 @@ To build and verify the committed checkout as installable distributions, run:
 python3 scripts/verify-artifact.py /tmp/uptible-verified
 ```
 
-The output directory must be empty and the checkout clean. The command builds a wheel and source distribution from the commit, checks their file lists, installs the wheel in a fresh temporary environment, and runs the synthetic tests outside the checkout. It records the commit and SHA-256 digests alongside the artifacts. It downloads pinned build tools and the package's runtime dependencies from the configured Python package index. CI runs this check on Linux with Python 3.10 and 3.14 and retains the artifacts. These checks do not establish operating-system keyring support or deployed-service compatibility. Remaining command coverage stays in issue #1.
+The output directory must be empty and the checkout clean. The command builds twice from the commit in independent environments with hashed build and runtime inputs from PyPI. It compares artifact hashes and selected dependency hashes, checks package file lists, installs the wheel, and runs all synthetic tests outside the checkout. It also requires altered dependency bytes and an unexpected wheel member to fail verification. The artifacts include `BUILD_MANIFEST.json`, `SOURCE_REVISION`, `SHA256SUMS`, dependency reports, and negative-control logs. See [the release design](DESIGN.md#release-inputs-and-reproducibility) for the exact reproducibility claim and supported matrix. CI runs Python 3.10 through 3.14 on Linux. These checks do not establish operating-system keyring support or deployed-service compatibility. Remaining command coverage stays in issue #1.
 
 ## Release
 
-Pushing a tag such as `v0.1.0` runs `.github/workflows/release.yml`. The tag must match the version in `pyproject.toml` and in `uptible_cli.VERSION`. The workflow builds and verifies the distributions with `scripts/verify-artifact.py`, then renders a Homebrew formula with `scripts/homebrew-formula.py`. A macOS job installs, tests and audits that formula from the built source distribution. Only then does it publish a GitHub release with the wheel, the source distribution, `SHA256SUMS`, `SOURCE_REVISION` and `uptible.rb`. Pull requests run the same steps without publishing.
+Pushing a tag such as `v0.1.0` runs `.github/workflows/release.yml`. The tag must match the version in `pyproject.toml` and in `uptible_cli.VERSION`. The workflow builds and verifies the distributions with `scripts/verify-artifact.py`, then renders a Homebrew formula with `scripts/homebrew-formula.py`. A macOS job installs, tests and audits that formula from the built source distribution. Only then does it publish a GitHub release with the wheel, the source distribution, `SHA256SUMS`, `SOURCE_REVISION`, `BUILD_MANIFEST.json` and `uptible.rb`. Pull requests run the same steps without publishing.
 
-To publish through Homebrew, copy the released `uptible.rb` to `Formula/uptible.rb` in `jonbaldie/homebrew-tap`. Then check `brew install jonbaldie/tap/uptible` and `brew test jonbaldie/tap/uptible`. The formula installs into its own Python 3.14 virtual environment. The dependency pins in `scripts/homebrew-formula.py` are resolved for `keyring>=25,<26` and `filelock>=3.16,<4`. Update them when those ranges change.
+To publish through Homebrew, copy the released `uptible.rb` to `Formula/uptible.rb` in `jonbaldie/homebrew-tap`. Then check `brew install jonbaldie/tap/uptible` and `brew test jonbaldie/tap/uptible`. The formula installs into its own Python 3.14 virtual environment. The renderer authenticates the source archive against the verifier manifest. The formula verifies pinned source resources, installed module identity, and dependency versions. Follow [the dependency update procedure](DESIGN.md#compatibility-and-dependency-updates) when changing those inputs.
+
+
+To rehearse Homebrew locally without publishing, use the verified source archive. Set `verified` to the absolute output directory from the verifier:
+
+```sh
+verified=/absolute/path/to/uptible-verified
+brew tap-new --no-git local/uptible
+python3 scripts/homebrew-formula.py --version 0.1.0 \
+  --sdist "$verified/uptible_cli-0.1.0.tar.gz" --url "file://$verified/uptible_cli-0.1.0.tar.gz" \
+  > "$(brew --repository)/Library/Taps/local/homebrew-uptible/Formula/uptible.rb"
+brew install local/uptible/uptible
+brew test local/uptible/uptible
+brew audit --strict --formula local/uptible/uptible
+```
+
+This local tap is a release rehearsal. No public Homebrew package is available yet. After the maintainer publishes and verifies the release and tap, the customer install command becomes `brew install jonbaldie/tap/uptible`. A later published version updates with `brew update` and `brew upgrade jonbaldie/tap/uptible`. Production publication, clean-machine installation from the public tap, and login against `https://uptible.com` remain unperformed Go actions in [issue #24](https://github.com/jonbaldie/uptible-cli/issues/24).

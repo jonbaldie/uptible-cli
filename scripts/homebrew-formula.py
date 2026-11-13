@@ -1,47 +1,32 @@
 #!/usr/bin/env python3
-"""Render the Homebrew formula for a verified source distribution.
-
-Usage: python scripts/homebrew-formula.py --version 0.1.0 --sdist PATH [--url URL] > uptible.rb
-
-The default URL is the GitHub release asset for that version. Pass --url only to
-install a local build, for example file:///path/to/uptible_cli-0.1.0.tar.gz.
-"""
+"""Render a formula after checking a verified source archive and its manifest."""
 import argparse
 import hashlib
+import json
 from pathlib import Path
 import re
+import subprocess
+import tarfile
 
-# Runtime dependencies resolved for keyring>=25,<26 and filelock>=3.16,<4 on Python 3.14.
-# On Linux, cryptography comes from Homebrew's formula, as in homebrew-core's keyring users.
-RESOURCES = [
-    ('filelock', 'https://files.pythonhosted.org/packages/0f/59/e19834834cb01a32febfbb0f8a23a9088088f5d45991824ff2bc3b5e8acb/filelock-3.32.7.tar.gz', '37b8a3d9811b0f9aef7e5ec5c71bb320de52df51e6ca9bcd6f5ad81187660da7'),
-    ('jaraco-classes', 'https://files.pythonhosted.org/packages/06/c0/ed4a27bc5571b99e3cff68f8a9fa5b56ff7df1c2251cc715a652ddd26402/jaraco.classes-3.4.0.tar.gz', '47a024b51d0239c0dd8c8540c6c7f484be3b8fcf0b2d85c13825780d3b3f3acd'),
-    ('jaraco-context', 'https://files.pythonhosted.org/packages/af/50/4763cd07e722bb6285316d390a164bc7e479db9d90daa769f22578f698b4/jaraco_context-6.1.2.tar.gz', 'f1a6c9d391e661cc5b8d39861ff077a7dc24dc23833ccee564b234b81c82dfe3'),
-    ('jaraco-functools', 'https://files.pythonhosted.org/packages/6c/1f/c23395957d41ccf27c4e535c3d334c4051e5395b3752057ba4cbaec35c56/jaraco_functools-4.6.0.tar.gz', '880c577ec9720b3a052d5bc611fb9f2269b3d87902ef42440df443b88e443280'),
-    ('keyring', 'https://files.pythonhosted.org/packages/43/4b/674af6ef2f97d56f0ab5153bf0bfa28ccb6c3ed4d1babf4305449668807b/keyring-25.7.0.tar.gz', 'fe01bd85eb3f8fb3dd0405defdeac9a5b4f6f0439edbb3149577f244a2e8245b'),
-    ('more-itertools', 'https://files.pythonhosted.org/packages/52/b8/c63995bebbb9ac9c059350e0fb8c82c2420c85aeca7d34e40aecf3df9281/more_itertools-11.2.1.tar.gz', 'cbf08fd0af284dc69718b9b76a8e6203df624d70209ea511e4219d350c856f63'),
-]
-LINUX_RESOURCES = [
-    ('jeepney', 'https://files.pythonhosted.org/packages/7b/6f/357efd7602486741aa73ffc0617fb310a29b588ed0fd69c2399acbb85b0c/jeepney-0.9.0.tar.gz', 'cf0e9e845622b81e4a28df94c40345400256ec608d0e55bb8a3feaa9163f5732'),
-    ('secretstorage', 'https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz', 'f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be'),
-]
+ROOT = Path(__file__).resolve().parents[1]
 
 
-def resource(name, url, sha256, indent):
+def resource(item, indent):
     pad = ' ' * indent
-    return f'{pad}resource "{name}" do\n{pad}  url "{url}"\n{pad}  sha256 "{sha256}"\n{pad}end\n'
+    return f'{pad}resource "{item["name"]}" do\n{pad}  url "{item["url"]}"\n{pad}  sha256 "{item["sha256"]}"\n{pad}end\n'
 
 
-def render(version, url, sha256):
-    common = '\n'.join(resource(*r, 2) for r in RESOURCES)
-    linux = '\n'.join(resource(*r, 4) for r in LINUX_RESOURCES)
+def render(version, url, digest, module_digest, resources):
+    common = '\n'.join(resource(item, 2) for item in resources if item['platform'] == 'all')
+    linux = '\n'.join(resource(item, 4) for item in resources if item['platform'] == 'linux')
+    versions = {item['name']: item['version'] for item in resources if item['platform'] == 'all'}
     return f'''class Uptible < Formula
   include Language::Python::Virtualenv
 
   desc "Connect and manage an Uptible account from the terminal"
   homepage "https://github.com/jonbaldie/uptible-cli"
   url "{url}"
-  sha256 "{sha256}"
+  sha256 "{digest}"
 
   depends_on "python@3.14"
 
@@ -57,15 +42,26 @@ def render(version, url, sha256):
 
   test do
     assert_equal "uptible #{{version}}", shell_output("#{{bin}}/uptible --version").strip
+    system libexec/"bin/python", "-c", <<~PYTHON
+      import hashlib
+      import importlib.metadata as metadata
+      from pathlib import Path
+      import uptible_cli
+      assert hashlib.sha256(Path(uptible_cli.__file__).read_bytes()).hexdigest() == "{module_digest}"
+      assert metadata.version("uptible-cli") == "{version}"
+      for name, expected in {json.dumps(versions, sort_keys=True)}.items():
+          assert metadata.version(name) == expected, name
+    PYTHON
   end
 end
 '''
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--version', required=True)
     parser.add_argument('--sdist', required=True, type=Path)
+    parser.add_argument('--manifest', type=Path, help='Defaults to BUILD_MANIFEST.json beside the sdist')
     parser.add_argument('--url')
     args = parser.parse_args()
     if not re.fullmatch(r'\d+\.\d+\.\d+', args.version):
@@ -73,8 +69,29 @@ def main():
     expected = f'uptible_cli-{args.version}.tar.gz'
     if args.sdist.name != expected:
         parser.error(f'sdist must be named {expected}')
+    manifest = json.loads((args.manifest or args.sdist.parent / 'BUILD_MANIFEST.json').read_text())
+    revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+    digest = hashlib.sha256(args.sdist.read_bytes()).hexdigest()
+    if manifest['version'] != args.version or manifest['source_revision'] != revision or manifest['artifacts'].get(expected) != digest:
+        parser.error('source archive does not match the verified version, revision and digest')
+    inputs = (ROOT / 'scripts/homebrew-resources.json').read_bytes()
+    if hashlib.sha256(inputs).hexdigest() != manifest['inputs']['homebrew-resources.json']:
+        parser.error('formula resources differ from the verified inputs')
+    with tarfile.open(args.sdist) as archive:
+        member = archive.extractfile(f'uptible_cli-{args.version}/src/uptible_cli/__init__.py')
+        if member is None or hashlib.sha256(member.read()).hexdigest() != manifest['module_sha256']:
+            parser.error('source module differs from the verified module')
+    resources = json.loads(inputs)
+    requirements = {re.sub(r'[-_.]+', '-', match[1].lower()): match[2]
+                    for match in re.finditer(r'^([A-Za-z0-9_.-]+)==([^\s;]+)',
+                                             (ROOT / 'scripts/runtime-requirements.txt').read_text(), re.M)}
+    for item in resources:
+        if requirements.get(item['name']) != item['version']:
+            parser.error(f'resource is not in the runtime inputs: {item["name"]}')
     url = args.url or f'https://github.com/jonbaldie/uptible-cli/releases/download/v{args.version}/{expected}'
-    print(render(args.version, url, hashlib.sha256(args.sdist.read_bytes()).hexdigest()), end='')
+    if not re.fullmatch(r'(https|file)://[A-Za-z0-9_./:%+~@?=&-]+', url):
+        parser.error('URL must be an HTTPS or file URL without quotes, spaces or interpolation')
+    print(render(args.version, url, digest, manifest['module_sha256'], resources), end='')
 
 
 if __name__ == '__main__':
