@@ -401,8 +401,8 @@ urllib.request.urlopen(url, timeout=5).read()
 ''')
         self.driver.chmod(0o700)
         self.base = [sys.executable, '-m', 'uptible_cli', '--json', '--issuer', 'http://127.0.0.1:' + str(self.server.server_port), '--client-id', 'test', '--credential-file', str(self.creds)]
-    def run_cli(self, *args, env=None):
-        result = subprocess.run(self.base + list(args), capture_output=True, text=True, env=env, timeout=10)
+    def run_cli(self, *args, env=None, cwd=None):
+        result = subprocess.run(self.base + list(args), capture_output=True, text=True, env=env, cwd=cwd, timeout=10)
         return result, json.loads(result.stdout or result.stderr)
     def use_named_connection(self, leading_dash=False):
         self.creds = self.path / "saved 'credential' $HOME.json"
@@ -437,15 +437,15 @@ urllib.request.urlopen(url, timeout=5).read()
             self.assertIn('--json', command)
         return lines
 
-    def follow_recovery(self, message):
+    def follow_recovery(self, message, cwd=None):
         logout, login = self.recovery_commands(message)
         env = dict(os.environ, PATH=str(Path(sys.executable).parent) + os.pathsep + os.environ.get('PATH', ''))
-        result = subprocess.run(['/bin/sh', '-c', logout], capture_output=True, text=True, env=env, timeout=10)
+        result = subprocess.run(['/bin/sh', '-c', logout], capture_output=True, text=True, env=env, cwd=cwd, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), {'connected': False, 'revoked': False})
         self.assertFalse(self.creds.exists())
         login += ' --browser-driver ' + shlex.quote(str(self.driver))
-        result = subprocess.run(['/bin/sh', '-c', login], capture_output=True, text=True, env=env, timeout=10)
+        result = subprocess.run(['/bin/sh', '-c', login], capture_output=True, text=True, env=env, cwd=cwd, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)['account']['id'], 42)
         self.assertEqual(json.loads(self.creds.read_text())['account_id'], 42)
@@ -1330,6 +1330,21 @@ urllib.request.urlopen(url, timeout=5).read()
         result, body = self.run_cli('account', 'show')
         self.assertEqual((result.returncode, body['error']['code']), (3, 'refresh_account_changed'))
         self.follow_recovery(body['error']['message'])
+
+    def test_recovery_preserves_a_relative_credential_file_starting_with_a_dash(self):
+        self.use_named_connection()
+        self.creds = self.path / '-saved'
+        position = self.base.index('--credential-file')
+        self.base[position:position + 2] = ['--credential-file=-saved']
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver), cwd=self.path)[0].returncode, 0)
+        saved = json.loads(self.creds.read_text())
+        saved['expires_at'] = 0
+        self.creds.write_text(json.dumps(saved))
+        Server.refresh_account = 43
+        result, body = self.run_cli('account', 'show', cwd=self.path)
+        self.assertEqual((result.returncode, body['error']['code']), (3, 'refresh_account_changed'))
+        self.follow_recovery(body['error']['message'], cwd=self.path)
 
     def test_upgrade_refresh_permission_mismatch_reports_working_recovery(self):
         self.use_named_connection()
