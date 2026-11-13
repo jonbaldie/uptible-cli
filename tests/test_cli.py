@@ -404,11 +404,26 @@ urllib.request.urlopen(url, timeout=5).read()
     def run_cli(self, *args, env=None):
         result = subprocess.run(self.base + list(args), capture_output=True, text=True, env=env, timeout=10)
         return result, json.loads(result.stdout or result.stderr)
-    def use_named_connection(self):
+    def use_named_connection(self, leading_dash=False):
         self.creds = self.path / "saved 'credential' $HOME.json"
         self.base[self.base.index('--credential-file') + 1] = str(self.creds)
-        self.base[self.base.index('--client-id') + 1] = "test 'client' $HOME"
-        self.base.extend(['--profile', "profile 'quoted' $HOME; false"])
+        client = "test 'client' $HOME"
+        profile = "profile 'quoted' $HOME; false"
+        if leading_dash:
+            position = self.base.index('--client-id')
+            self.base[position:position + 2] = ['--client-id=-test-client']
+            self.base.append('--profile=-test-profile')
+        else:
+            self.base[self.base.index('--client-id') + 1] = client
+            self.base.extend(['--profile', profile])
+
+    def option_value(self, command, option):
+        for index, value in enumerate(command):
+            if value == option:
+                return command[index + 1]
+            if value.startswith(option + '='):
+                return value[len(option) + 1:]
+        self.fail('Missing option ' + option)
 
     def recovery_commands(self, message):
         self.assertIn('Revoke', message)
@@ -418,7 +433,7 @@ urllib.request.urlopen(url, timeout=5).read()
             command = shlex.split(line)
             self.assertEqual(command[-len(action):], action)
             for option in ('--issuer', '--client-id', '--profile', '--credential-file'):
-                self.assertEqual(command[command.index(option) + 1], self.base[self.base.index(option) + 1])
+                self.assertEqual(self.option_value(command, option), self.option_value(self.base, option))
             self.assertIn('--json', command)
         return lines
 
@@ -1303,6 +1318,18 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(self.creds.read_bytes(), before)
         self.assertEqual(Server.refreshes, 0)
         self.follow_recovery(first_message)
+
+    def test_recovery_preserves_connection_options_starting_with_a_dash(self):
+        self.use_named_connection(leading_dash=True)
+        Server.jwt_mode = True
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        saved = json.loads(self.creds.read_text())
+        saved['expires_at'] = 0
+        self.creds.write_text(json.dumps(saved))
+        Server.refresh_account = 43
+        result, body = self.run_cli('account', 'show')
+        self.assertEqual((result.returncode, body['error']['code']), (3, 'refresh_account_changed'))
+        self.follow_recovery(body['error']['message'])
 
     def test_upgrade_refresh_permission_mismatch_reports_working_recovery(self):
         self.use_named_connection()
