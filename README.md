@@ -69,13 +69,21 @@ uptible installation show
 uptible notifications activity 1
 ```
 
-Use the returned ID and revision in place of the example values. Edit requires the current revision and a message. Omitted settings remain unchanged. If an edit conflicts, fetch the notification, review the current settings and revision, and decide whether to retry. Use `--help` on create or edit for configuration options. Activation, installation and activity require lifetime access. `deactivate`, `archive`, and `restore` are also available. Listing returns `next_after`; pass that value as `--after` for the next page. Permanent deletion is not available in this version.
+Use the returned ID and revision in place of the example values. Edit requires the current revision and a message. Omitted settings remain unchanged. If an edit conflicts, fetch the notification, review the current settings and revision, and decide whether to retry. Use `--help` on create or edit for configuration options. Activation, installation and activity require lifetime access. `deactivate`, `archive`, and `restore` are also available. Listing returns `next_after`; pass that value as `--after` for the next page.
 
 Existing connections made before these commands may lack their permissions. If a command returns HTTP 403, check lifetime access and the connection permissions.
 
+## Permanently delete a notification
+
+Unlike archive, permanent deletion removes the notification and its collected leads. You can also delete an archived notification. Historical tracks and shared sessions remain, and logs, caches, or backups may retain data.
+
+Ordinary login does not request deletion permission. For a new connection, run `uptible auth login --delete-notifications`. For an existing connection, run `uptible auth login --add --delete-notifications`. Approve the permission and enter your current password in the browser. The CLI does not ask for your password.
+
+Run `uptible notifications delete 123` and confirm the prompt. Use `--yes` to confirm without a prompt. A successful command returns `{"deleted": true, "id": 123}` after the server confirms deletion. The CLI never automatically repeats the delete request. If the outcome is unknown, run `uptible notifications show 123` before deciding whether to retry. A missing or foreign notification returns HTTP 404.
+
 ## Add permissions
 
-Use `uptible auth login --add` with one or more of `--events`, `--billing`, and `--delete-leads`. The browser asks you to approve the existing permissions and the additions. Sign in to the same account. Deleting leads requires your current password in the browser.
+Use `uptible auth login --add` with one or more of `--events`, `--billing`, `--delete-leads`, and `--delete-notifications`. The browser asks you to approve the existing permissions and the additions. Sign in to the same account. Deleting leads or notifications requires your current password in the browser.
 
 The CLI retains the existing connection if you decline or select a different account. It saves the approved connection before revoking the old grant. If it cannot confirm grant cleanup, check your account connections and revoke the unintended connection. If the CLI cannot determine the existing permissions, it stops without replacing the connection.
 
@@ -99,7 +107,7 @@ For an alternate service, pass `--issuer` and its registered `--client-id` befor
 
 If login reports that a grant may have been created or that revocation could not be confirmed, inspect your account connections and revoke any unintended grant before retrying.
 
-If refresh fails or is interrupted, its outcome can be unknown. The CLI retains the old credential and refuses to replay it. Revoke the connection on your account page, run `auth logout --local`, and log in again with the same issuer, client ID, and storage options.
+If refresh fails or is interrupted, its outcome can be unknown. The CLI retains the old credential and refuses to replay it. If a refresh during a permission upgrade returns a different account or permissions, the CLI does not save the new credential. The previous refresh credential may already be consumed. Revoke the connection on your account page, run `auth logout --local`, and log in again with the same issuer, client ID, and storage options.
 
 ## Output and help
 
@@ -117,16 +125,17 @@ Exit codes are `0` for success, `2` for usage or configuration errors, `3` for s
 | Update notification settings | `uptible notifications edit` |
 | Activate or deactivate a notification | `uptible notifications activate`, `uptible notifications deactivate` |
 | Archive or restore a notification | `uptible notifications archive`, `uptible notifications restore` |
+| Permanently delete a notification | `uptible notifications delete` |
 | Show dashboard statistics | `uptible stats show` |
 | Show installation details | `uptible installation show` |
 | Show notification activity | `uptible notifications activity` |
 | List, show, or permanently delete leads | `uptible leads list`, `uptible leads show`, `uptible leads delete` |
-| Permanently delete or preview a notification | Not implemented |
+| Preview a notification | Not implemented |
 | Submit capture or tracking events | `uptible events capture`, `uptible events track` |
 | Read lifetime billing | `uptible billing status` |
 | Modify an account, view broader statistics, or initiate checkout | Not implemented |
 
-The connection routes are experimental and may change before a public API contract is published. Permanent notification deletion, checkout, and other account operations are not implemented. Full command coverage, server compatibility, reproducible release dependencies and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
+The connection routes are experimental and may change before a public API contract is published. Checkout and other account operations are not implemented. Full command coverage, server compatibility, reproducible release dependencies and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
 
 ## Development
 
