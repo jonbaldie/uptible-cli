@@ -59,7 +59,11 @@ class ActualAccount(unittest.TestCase):
         from uptible_cli import issuer_url
 
         issuer = issuer_url(os.environ['UPTIBLE_TEST_ISSUER'])
-        if urllib.parse.urlsplit(issuer).hostname in ('uptible.com', 'www.uptible.com'):
+        try:
+            hostname = urllib.parse.urlsplit(issuer).hostname.encode('idna').decode('ascii').rstrip('.').lower()
+        except UnicodeError:
+            self.fail('Use a valid isolated test hostname')
+        if not hostname or hostname in ('uptible.com', 'www.uptible.com'):
             self.fail('Use an isolated test service, not the production issuer')
         client = os.environ['UPTIBLE_TEST_CLIENT_ID']
         expected = int(os.environ['UPTIBLE_TEST_ACCOUNT_ID'])
