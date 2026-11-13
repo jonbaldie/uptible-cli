@@ -80,7 +80,9 @@ def normalize_sdist(path, epoch):
         roots = {m.name.split('/')[0] for m in members}
         files = {m.name.split('/', 1)[1] for m in members if m.isfile() and '/' in m.name}
         if (len(roots) != 1 or not files <= SOURCE_FILES
-                or not {'pyproject.toml', 'src/uptible_cli/__init__.py'} <= files
+                or not {'pyproject.toml', 'src/uptible_cli/__init__.py', 'tests/test_contract.py',
+                        'docs/contracts/manifest.json', 'docs/contracts/v1.1.0.json',
+                        'docs/contracts/cli-operations.json', 'docs/contracts/README.md'} <= files
                 or any('..' in Path(m.name).parts or m.name.startswith('/') for m in members)):
             raise ValueError(f'Unexpected source distribution contents: {sorted(files)}')
         contents = [(m.name, tar.extractfile(m).read() if m.isfile() else None) for m in members]
