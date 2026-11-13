@@ -1,4 +1,3 @@
-"""Verify installed consumer requests against the pinned public OpenAPI contract."""
 import copy
 import hashlib
 import json
