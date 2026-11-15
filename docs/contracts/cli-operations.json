@@ -208,7 +208,8 @@
       "--custom-delay-x-seconds",
       "5",
       "--display-last-x-conversions",
-      "10"
+      "10",
+      "--match-host-dark-mode"
     ],
     "scopes": [
       "notifications:write"
@@ -221,7 +222,8 @@
       "display_maps_only": 1,
       "custom_delay_x_seconds": 5,
       "display_last_x_conversions": 10,
-      "state": "active"
+      "state": "active",
+      "match_host_dark_mode": true
     },
     "headers": {
       "Idempotency-Key": "synthetic-create"
@@ -263,7 +265,8 @@
       "--custom-delay-x-seconds",
       "5",
       "--display-last-x-conversions",
-      "10"
+      "10",
+      "--no-match-host-dark-mode"
     ],
     "scopes": [
       "notifications:write"
@@ -276,7 +279,8 @@
       "display_maps_only": 1,
       "custom_delay_x_seconds": 5,
       "display_last_x_conversions": 10,
-      "revision": 2
+      "revision": 2,
+      "match_host_dark_mode": false
     },
     "headers": {}
   },
