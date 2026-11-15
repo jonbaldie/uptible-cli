@@ -175,7 +175,7 @@ source ~/.local/share/uptible/completion.zsh
 
 Add those last three lines to `~/.zshrc`. If your configuration already runs `compinit`, add only the `source` line after it. Zsh 5.9 is exercised by the shell checks.
 
-In either shell, type `uptible no` and press Tab to complete `notifications`. Type `uptible auth lo` and press Tab twice to see `login` and `logout`. Type `uptible leads list --limit 9` and press Tab twice for the matching fixed numeric choices. `uptible notifications edit 123 --no-` completes `--no-display-maps-only`.
+In either shell, type `uptible no` and press Tab to complete `notifications`. Type `uptible auth lo` and press Tab twice to see `login` and `logout`. Type `uptible leads list --limit 9` and press Tab twice for the matching fixed numeric choices. `uptible notifications edit 123 --no-d` completes `--no-display-maps-only`.
 
 After upgrading the installed CLI, rerun the generation command for your shell and source the resulting file again. Candidates come from the installed parser on each Tab press. Use `uptible completion --help` to find the supported shells. Generation and querying require the installed `uptible` executable on `PATH`.
 
