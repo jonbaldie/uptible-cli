@@ -26,7 +26,7 @@ SOURCE_FILES = {'PKG-INFO', 'README.md', 'DESIGN.md', 'CHANGELOG.md', 'docs/capa
                 'src/uptible_cli.egg-info/requires.txt', 'src/uptible_cli.egg-info/top_level.txt',
                 'tests/test_cli.py', 'tests/test_completion.py', 'tests/test_integration.py', 'tests/test_contract.py',
                 'MANIFEST.in', 'docs/contracts/README.md', 'docs/contracts/manifest.json',
-                'docs/contracts/v1.1.0.json', 'docs/contracts/cli-operations.json'}
+                'docs/contracts/v1.1.0.json', 'docs/contracts/v1.2.0.json', 'docs/contracts/cli-operations.json'}
 
 
 def sha256(path):
@@ -82,7 +82,7 @@ def normalize_sdist(path, epoch):
         if (len(roots) != 1 or not files <= SOURCE_FILES
                 or not {'pyproject.toml', 'src/uptible_cli/__init__.py', 'tests/test_contract.py',
                         'DESIGN.md', 'CHANGELOG.md', 'docs/capabilities.md',
-                        'docs/contracts/manifest.json', 'docs/contracts/v1.1.0.json',
+                        'docs/contracts/manifest.json', 'docs/contracts/v1.1.0.json', 'docs/contracts/v1.2.0.json',
                         'docs/contracts/cli-operations.json', 'docs/contracts/README.md'} <= files
                 or any('..' in Path(m.name).parts or m.name.startswith('/') for m in members)):
             raise ValueError(f'Unexpected source distribution contents: {sorted(files)}')

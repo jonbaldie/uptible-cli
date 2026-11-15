@@ -52,6 +52,9 @@ class Server(BaseHTTPRequestHandler):
     drop_create = False
     api_error = None
     api_headers = {}
+    contract_version = '1.2.0'
+    contract_probes = []
+    host_theme_record = None
     rejections = []
     notification_records = None
     delete_success_status = 204
@@ -73,6 +76,8 @@ class Server(BaseHTTPRequestHandler):
         raw = json.dumps(value).encode()
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
+        if self.contract_version is not None:
+            self.send_header('Uptible-API-Version', self.contract_version)
         if status >= 400:
             self.rejections.append((self.command, self.path, status))
             for name, value in self.api_headers.items():
@@ -178,7 +183,12 @@ class Server(BaseHTTPRequestHandler):
                 self.connection.shutdown(2)
                 self.connection.close()
                 return
-            self.respond({'id': 7, 'revision': 1}, 201)
+            if self.host_theme_record is not None:
+                self.host_theme_record.clear()
+                self.host_theme_record.update({'id': 7, 'revision': 1, 'match_host_dark_mode': False, **json.loads(raw)})
+                self.respond(self.host_theme_record, 201)
+            else:
+                self.respond({'id': 7, 'revision': 1}, 201)
             return
         form = urllib.parse.parse_qs(raw)
         self.calls.append((self.path, form))
@@ -253,6 +263,15 @@ class Server(BaseHTTPRequestHandler):
         if self.damaged_response(raw):
             return
         self.operations.append(('PUT', self.path, json.loads(raw)))
+        if self.host_theme_record is not None and self.path == '/api/v1/notifications/7':
+            payload = json.loads(raw)
+            if payload['revision'] != self.host_theme_record['revision']:
+                self.respond({'code': 'conflict'}, 409)
+            else:
+                self.host_theme_record.update(payload)
+                self.host_theme_record['revision'] += 1
+                self.respond(self.host_theme_record)
+            return
         if self.path == '/api/v1/notifications/7' and json.loads(raw).get('revision') != 2:
             self.respond({'error': 'conflict'}, 409)
         else:
@@ -306,6 +325,8 @@ class Server(BaseHTTPRequestHandler):
             self.send_response(204)
             self.end_headers()
     def do_GET(self):
+        if self.path == '/api/v1/account' and not self.headers.get('Authorization'):
+            self.contract_probes.append((self.command, self.path, self.headers.get('Authorization')))
         if self.damaged_response():
             return
         if self.reject_next and self.path.startswith('/api/'):
@@ -340,7 +361,10 @@ class Server(BaseHTTPRequestHandler):
             return
         if self.path.startswith(('/api/v1/notifications', '/api/v1/leads')) or self.path == '/api/v1/installation':
             self.operations.append(('GET', self.path))
-            self.respond({'path': self.path})
+            if self.host_theme_record is not None and self.path.startswith('/api/v1/notifications'):
+                self.respond({'data': [self.host_theme_record]} if '?' in self.path else self.host_theme_record)
+            else:
+                self.respond({'path': self.path})
             return
         parsed = urllib.parse.urlsplit(self.path)
         if parsed.path == '/oauth/authorize':
@@ -399,6 +423,9 @@ class CLI(unittest.TestCase):
         Server.drop_create = False
         Server.api_error = None
         Server.api_headers = {}
+        Server.contract_version = '1.2.0'
+        Server.contract_probes = []
+        Server.host_theme_record = None
         Server.rejections = []
         Server.notification_records = None
         Server.delete_success_status = 204
@@ -1668,6 +1695,81 @@ urllib.request.urlopen(url, timeout=5).read()
         result = subprocess.run(self.base + ['notifications', 'create', '--idempotency-key', 'bad key', '--message', 'x'], capture_output=True)
         self.assertEqual(result.returncode, 2)
 
+    def test_host_appearance_create_edit_read_and_conflict(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        Server.host_theme_record = {}
+        for flags, expected in (((), False), (('--match-host-dark-mode',), True), (('--no-match-host-dark-mode',), False)):
+            with self.subTest(flags=flags):
+                result, body = self.run_cli('notifications', 'create', '--idempotency-key', 'theme', '--message', 'Hello', *flags)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIs(body['match_host_dark_mode'], expected)
+                payload = Server.operations[-1][-1]
+                if flags:
+                    self.assertIs(payload['match_host_dark_mode'], expected)
+                else:
+                    self.assertNotIn('match_host_dark_mode', payload)
+        for flags, revision, expected in ((('--match-host-dark-mode',), '1', True), ((), '2', True), (('--no-match-host-dark-mode',), '3', False)):
+            result, body = self.run_cli('notifications', 'edit', '7', '--revision', revision, '--message', 'Changed', *flags)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIs(body['match_host_dark_mode'], expected)
+            self.assertEqual(body['revision'], int(revision) + 1)
+            payload = Server.operations[-1][-1]
+            if not flags:
+                self.assertNotIn('match_host_dark_mode', payload)
+        result, body = self.run_cli('notifications', 'edit', '7', '--revision', '1', '--message', 'Stale', '--match-host-dark-mode')
+        self.assertEqual((result.returncode, body['error']['code']), (3, 'conflict'))
+        self.assertEqual(Server.host_theme_record['revision'], 4)
+        self.assertIs(Server.host_theme_record['match_host_dark_mode'], False)
+        self.assertIs(self.run_cli('notifications', 'show', '7')[1]['match_host_dark_mode'], False)
+        self.assertIs(self.run_cli('notifications', 'list')[1]['data'][0]['match_host_dark_mode'], False)
+        self.assertEqual(Server.contract_probes, [('GET', '/api/v1/account', None)] * 5)
+
+    def test_host_appearance_rejects_unknown_contract_before_writes(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        for version in (None, '', '1.1.0', '1.1.99', '1.2', '01.2.0', '1.02.0', '1.2.0-private', '2.0.0', 'synthetic-secret-marker'):
+            Server.contract_version = version
+            for operation in (('create', '--idempotency-key', 'theme'), ('edit', '7', '--revision', '2')):
+                for flag in ('--match-host-dark-mode', '--no-match-host-dark-mode'):
+                    with self.subTest(version=version, operation=operation[0], flag=flag):
+                        result, body = self.run_cli('notifications', *operation, '--message', 'Hello', flag)
+                        self.assertEqual((result.returncode, body['error']['code']), (3, 'unsupported_server_contract'))
+                        self.assertEqual(Server.operations, [])
+                        self.assertNotIn('synthetic-secret-marker', result.stderr)
+        for version in ('1.2.0', '1.2.1', '1.3.0'):
+            Server.contract_version = version
+            result, body = self.run_cli('notifications', 'create', '--idempotency-key', 'theme', '--message', 'Hello', '--match-host-dark-mode')
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(Server.operations), 3)
+
+    def test_omitted_host_appearance_keeps_old_server_payloads(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        for version in (None, '1.1.0'):
+            Server.contract_version = version
+            self.assertEqual(self.run_cli('notifications', 'create', '--idempotency-key', 'theme', '--message', 'Hello')[0].returncode, 0)
+            self.assertEqual(Server.operations[-1][-1], {'message': 'Hello'})
+            self.assertEqual(self.run_cli('notifications', 'edit', '7', '--revision', '2', '--message', 'Changed')[0].returncode, 0)
+            self.assertEqual(Server.operations[-1][-1], {'message': 'Changed', 'revision': 2})
+        self.assertEqual(Server.contract_probes, [])
+
+    def test_host_appearance_probe_failure_and_invalid_argument_never_write(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        Server.response_fault = ('GET', '/api/v1/account', 'bad-status')
+        result, body = self.run_cli('notifications', 'create', '--idempotency-key', 'theme', '--message', 'Hello', '--match-host-dark-mode')
+        self.assertEqual((result.returncode, body['error']['code']), (3, 'network_error'))
+        self.assertNotIn('synthetic-untrusted-marker', result.stderr)
+        self.assertEqual(Server.operations, [])
+        result = subprocess.run(self.base + ['notifications', 'create', '--idempotency-key', 'theme', '--message', 'Hello', '--match-host-dark-mode', 'true'], capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(Server.operations, [])
+
+    def test_host_appearance_validation_keeps_only_safe_field_names(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        Server.api_error = (422, {'code': 'validation_error', 'errors': {'match_host_dark_mode': ['synthetic-secret-marker'], 'private_field': ['hidden']}})
+        result, body = self.run_cli('notifications', 'create', '--idempotency-key', 'theme', '--message', 'Hello', '--match-host-dark-mode')
+        self.assertEqual((result.returncode, body['error']['fields']), (3, ['match_host_dark_mode']))
+        self.assertNotIn('synthetic-secret-marker', result.stderr)
+        self.assertNotIn('private_field', result.stderr)
+
     def test_unauthorized_refresh_and_uncertain_create(self):
         self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
         Server.reject_next = True
@@ -1722,7 +1824,7 @@ urllib.request.urlopen(url, timeout=5).read()
 
     def test_problem_context_is_allowlisted(self):
         self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
-        fields = ['message', 'url_capture', 'url_display', 'display_maps_only', 'custom_delay_x_seconds',
+        fields = ['message', 'url_capture', 'url_display', 'display_maps_only', 'match_host_dark_mode', 'custom_delay_x_seconds',
                   'display_last_x_conversions', 'revision', 'email', 'name', 'session_id', 'event_id',
                   'limit', 'after', 'before', 'archived', 'state', 'notification_id', 'from', 'until', 'cursor', 'claim_cursor']
         errors = {field: ['synthetic-secret-marker'] for field in fields}

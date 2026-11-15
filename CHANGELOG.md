@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add explicit notification host appearance enable and disable flags, preserving omitted settings and requiring server contract 1.2.0 before these writes. Pin the 1.2.0 schema while retaining the original 1.1.0 snapshot.
 - Pin OpenAPI 3.0.3 contract candidate 1.1.0 and its minimum compatible semantic server contract, with executable installed-command compatibility checks. Server publication and acceptance remain pending.
 - Add notification archive filters, reverse paging and explicit creation state. Send maps-only settings as the documented integer type.
 - Require HTTP 204 before confirming lead deletion and preserve uncertainty for unexpected success responses.

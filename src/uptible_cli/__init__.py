@@ -29,7 +29,7 @@ DEFAULT_CLIENT_ID = "5af9087d-4c3a-4bb9-a144-3cbf5560771a"
 SERVER_ERRORS = {"invalid_request", "invalid_client", "invalid_grant", "unauthorized_client", "unsupported_grant_type", "invalid_scope", "access_denied", "temporarily_unavailable", "server_error"}
 
 PROBLEM_ERRORS = {"bad_request", "unauthenticated", "forbidden", "not_found", "method_not_allowed", "conflict", "validation_error", "rate_limited", "upstream_unavailable", "internal_error", "request_error"}
-VALIDATION_FIELDS = {"message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions", "revision", "email", "name", "session_id", "event_id", "limit", "after", "before", "archived", "state", "notification_id", "from", "until", "cursor", "claim_cursor"}
+VALIDATION_FIELDS = {"message", "url_capture", "url_display", "display_maps_only", "match_host_dark_mode", "custom_delay_x_seconds", "display_last_x_conversions", "revision", "email", "name", "session_id", "event_id", "limit", "after", "before", "archived", "state", "notification_id", "from", "until", "cursor", "claim_cursor"}
 
 class Failure(Exception):
     def __init__(self, code, message, exit_code=1, *, http_status=0, correlation_id=None, fields=(), server_code=None):
@@ -119,6 +119,24 @@ def request(url, form=None, bearer=None, method=None, _retry=True, payload=None,
         raise
     except (Exception, KeyboardInterrupt):
         raise Failure("network_error", "Server request failed or returned invalid JSON.", 3) from None
+
+def require_host_theme_contract(issuer):
+    import re
+    req = urllib.request.Request(issuer + "/api/v1/account", headers={"Accept": "application/json"})
+    try:
+        try:
+            response = OPENER.open(req, timeout=15)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            version = response.headers.get("Uptible-API-Version", "")
+        if (len(version) > 64 or not re.fullmatch(r"1\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version)
+                or tuple(map(int, version.split("."))) < (1, 2, 0)):
+            raise Failure("unsupported_server_contract", "Host appearance changes require a server advertising Uptible API contract 1.2.0 or a compatible later 1.x version. No notification was changed.", 3)
+    except Failure:
+        raise
+    except (Exception, KeyboardInterrupt):
+        raise Failure("network_error", "Could not verify host appearance support. No notification was changed.", 3) from None
 
 def issuer_url(value):
     try:
@@ -528,6 +546,8 @@ def run(args):
             path += "/" + str(args.id)
             return authenticated(path, method="DELETE", expected_status=204) if args.action == "delete" else authenticated(path)
         path = issuer + "/api/v1/notifications"
+        if args.action in ("create", "edit") and args.match_host_dark_mode is not None:
+            require_host_theme_contract(issuer)
         if args.action == "list":
             params = {"limit": args.limit}
             params.update({key: value for key, value in (("after", args.after), ("before", args.before), ("archived", args.archived)) if value is not None})
@@ -586,7 +606,7 @@ def browser_option(parser):
 
 
 def notification_payload(args):
-    payload = {name: getattr(args, name) for name in ("message", "url_capture", "url_display", "display_maps_only", "custom_delay_x_seconds", "display_last_x_conversions") if getattr(args, name) is not None}
+    payload = {name: getattr(args, name) for name in ("message", "url_capture", "url_display", "display_maps_only", "match_host_dark_mode", "custom_delay_x_seconds", "display_last_x_conversions") if getattr(args, name) is not None}
     if "display_maps_only" in payload:
         payload["display_maps_only"] = int(payload["display_maps_only"])
     return payload
@@ -613,6 +633,8 @@ def notification_fields(parser):
     parser.add_argument("--url-capture")
     parser.add_argument("--url-display")
     parser.add_argument("--display-maps-only", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--match-host-dark-mode", action=argparse.BooleanOptionalAction, default=None,
+                        help="follow host page appearance; omit to preserve the server default or saved setting (requires API 1.2.0)")
     parser.add_argument("--custom-delay-x-seconds", type=int)
     parser.add_argument("--display-last-x-conversions", type=int)
 
