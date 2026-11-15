@@ -4,7 +4,7 @@ Use `uptible` to connect an Uptible account from your terminal, check the connec
 
 ## API compatibility
 
-CLI `0.1.0` targets `/api/v1` and requires server contract `1.1.0` or a compatible later `1.x` version. The [pinned OpenAPI candidate, operation mapping and support policy](docs/contracts/README.md) record the exact schema and its SHA-256. Public server publication and independent acceptance of this candidate are pending. This pin does not establish deployed compatibility or public availability.
+CLI `0.1.0` targets `/api/v1` and pins server contract `1.2.0`. Existing commands without the host appearance setting remain compatible with `1.1.0` and compatible later `1.x` versions. Explicit host appearance changes require an advertised contract of at least `1.2.0` within major `1`. The [pinned OpenAPI candidate, operation mapping and support policy](docs/contracts/README.md) record the exact schema and its SHA-256. Public server publication and independent acceptance of this candidate are pending. This pin does not establish deployed compatibility or public availability.
 
 ## Install
 
@@ -76,6 +76,19 @@ uptible notifications activity 1
 Use the returned ID and revision in place of the example values. Edit requires the current revision and a message. Omitted settings remain unchanged. If an edit conflicts, fetch the notification, review the current settings and revision, and decide whether to retry. Use `--help` on create or edit for configuration options. Activation, installation and activity require lifetime access. `deactivate`, `archive`, and `restore` are also available. Listing returns `next_after` and `previous_before`. Pass them as `--after` or `--before` for an explicit page. Use `--archived include`, `exclude` or `only` to filter archive visibility. Creation defaults to draft. Use `--state active` only when you intend immediate activation and have lifetime access.
 
 Existing connections made before these commands may lack their permissions. If a command returns HTTP 403, check lifetime access and the connection permissions.
+
+## Match notification appearance to the host page
+
+Add `--match-host-dark-mode` to notification creation or editing to follow the host page’s light or dark appearance. Use `--no-match-host-dark-mode` to disable it:
+
+```sh
+uptible notifications create --idempotency-key welcome-1 --message 'Welcome' --match-host-dark-mode
+uptible notifications edit 123 --revision 2 --message 'Welcome' --no-match-host-dark-mode
+```
+
+Omitting both flags leaves a new notification disabled by default and preserves an existing notification’s saved setting. `notifications show` and `notifications list` include the saved `match_host_dark_mode` boolean when returned by the server. Edits still require the current revision.
+
+Before sending an explicit appearance change, the CLI reads the server’s contract header without credentials. Missing, malformed or incompatible versions stop the command before its notification write. This setting requires server contract `1.2.0` or a compatible later `1.x` version.
 
 ## Permanently delete a notification
 
@@ -178,7 +191,7 @@ After upgrading the installed CLI, rerun the generation command for your shell a
 | Review lifetime checkout | `uptible billing checkout` opens the browser review page |
 | Arbitrary statistics windows and time zones | Not supported by the server |
 
-The CLI targets the pinned `1.1.0` contract candidate. Its public publication and real-server acceptance remain pending. Browser actions have explicit continuity and completion limits in the [capability reference](docs/capabilities.md). Full contract coverage, server compatibility and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
+The CLI targets the pinned `1.2.0` contract candidate. Commands omitting the optional host appearance setting retain their `1.1.0` compatibility. Public publication and real-server acceptance remain pending. Browser actions have explicit continuity and completion limits in the [capability reference](docs/capabilities.md). Full contract coverage, server compatibility and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
 
 ## Development
 

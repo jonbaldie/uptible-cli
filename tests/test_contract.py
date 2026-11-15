@@ -68,8 +68,9 @@ class ConsumerContract(unittest.TestCase):
     def test_pin_and_complete_operation_mapping(self):
         snapshot = CONTRACTS / MANIFEST['snapshot']
         self.assertEqual(hashlib.sha256(snapshot.read_bytes()).hexdigest(), MANIFEST['sha256'])
-        self.assertEqual(MANIFEST['sha256'], '69478e641f5fe22df2012abf3cec8db0089b8f083b228f26f99b093c1002868c')
-        self.assertEqual((MANIFEST['api_major'], MANIFEST['minimum_server_contract'], MANIFEST['openapi']), (1, '1.1.0', '3.0.3'))
+        self.assertEqual(MANIFEST['sha256'], 'f193da2278a507fffc9630f146dbb42b1221ff30706879af9339c95f7c849a19')
+        self.assertEqual((MANIFEST['api_major'], MANIFEST['minimum_server_contract'], MANIFEST['openapi']), (1, '1.2.0', '3.0.3'))
+        self.assertEqual(hashlib.sha256((CONTRACTS / 'v1.1.0.json').read_bytes()).hexdigest(), '69478e641f5fe22df2012abf3cec8db0089b8f083b228f26f99b093c1002868c')
         self.assertEqual(PINNED['info']['version'], MANIFEST['minimum_server_contract'])
         expected = {value['operationId'] for item in PINNED['paths'].values() for key, value in item.items() if key in ('get', 'post', 'put', 'delete', 'patch')}
         self.assertEqual({case['operation_id'] for case in CASES}, expected)
@@ -87,6 +88,11 @@ class ConsumerContract(unittest.TestCase):
                 pass
 
             def handle_command(self):
+                if self.command == 'GET' and self.path == '/api/v1/account' and not self.headers.get('Authorization'):
+                    self.send_response(401)
+                    self.send_header('Uptible-API-Version', SCHEMA['info']['version'])
+                    self.end_headers()
+                    return
                 case = current['case']
                 op = operation(SCHEMA, case)
                 try:
@@ -171,7 +177,8 @@ class ConsumerContract(unittest.TestCase):
         case = next(case for case in CASES if case['command'][:2] == ['notifications', 'create'])
         rule = operation(PINNED, case)['requestBody']['content']['application/json']['schema']
         validate(case['body'], rule, PINNED)
-        for change in ({'display_maps_only': True}, {'custom_delay_x_seconds': 4}, {'state': 'unknown'}):
+        for change in ({'display_maps_only': True}, {'custom_delay_x_seconds': 4}, {'state': 'unknown'},
+                       {'match_host_dark_mode': 1}, {'match_host_dark_mode': 'true'}):
             with self.subTest(change=change), self.assertRaises(AssertionError):
                 validate({**case['body'], **change}, rule, PINNED)
         changed = copy.deepcopy(PINNED)

@@ -33,7 +33,7 @@ class CompletionTests(unittest.TestCase):
         self.assertIn('--delete-notifications', self.complete('auth', 'login', '--delete'))
         self.assertEqual(self.complete('events', 'capture', '--e'), ['--email', '--event-id'])
         self.assertEqual(self.complete('billing', 'status', '--c'), ['--claim-cursor', '--cursor'])
-        self.assertEqual(self.complete('notifications', 'edit', '12', '--no-'), ['--no-display-maps-only'])
+        self.assertEqual(self.complete('notifications', 'edit', '12', '--no-'), ['--no-display-maps-only', '--no-match-host-dark-mode'])
         self.assertEqual(self.complete('--j', 'leads', 'delete', '12', '--y'), ['--yes'])
         self.assertEqual(self.complete('--profile=synthetic', 'stats', ''), ['show'])
         self.assertEqual(self.complete('--issuer', 'https://example.invalid', '--client-id', 'synthetic', 'account', ''), ['confirm-email', 'onboarding', 'security', 'settings', 'show', 'update'])
@@ -115,7 +115,7 @@ class CompletionTests(unittest.TestCase):
                  (['uptible', 'notifications', 'pre'], ['preview']),
                  (['uptible', 'no'], ['notifications']),
                  (['uptible', 'auth', 'lo'], ['login', 'logout']),
-                 (['uptible', 'notifications', 'edit', '12', '--no-'], ['--no-display-maps-only']),
+                 (['uptible', 'notifications', 'edit', '12', '--no-'], ['--no-display-maps-only', '--no-match-host-dark-mode']),
                  (['uptible', 'events', 'capture', '1', '--e'], ['--email', '--event-id']),
                  (['uptible', 'billing', 'status', '--c'], ['--claim-cursor', '--cursor']),
                  (['uptible', 'leads', 'list', '--limit', '99'], ['99']),
@@ -124,7 +124,7 @@ class CompletionTests(unittest.TestCase):
                  (['uptible', '--profile', '=', 'auth', ''], ['login', 'logout', 'status']),
                  (['uptible', 'auth', 'login', '--browser-driver', ''], []),
                  (['uptible', 'bad', ''], []),
-                 (['uptible', 'notifications', 'create', '--message', '$(touch marker)', '--no-'], ['--no-display-maps-only'])]
+                 (['uptible', 'notifications', 'create', '--message', '$(touch marker)', '--no-'], ['--no-display-maps-only', '--no-match-host-dark-mode'])]
         for shell in ('bash', 'zsh'):
             if not shutil.which(shell):
                 self.skipTest(f'{shell} is unavailable')
