@@ -4,7 +4,7 @@ Use `uptible` to connect an Uptible account from your terminal, check the connec
 
 ## API compatibility
 
-CLI `0.1.0` targets `/api/v1` and requires server contract `1.1.0` or a compatible later `1.x` version. The [pinned OpenAPI candidate, operation mapping and support policy](docs/contracts/README.md) record the exact schema and its SHA-256. Public server publication and independent acceptance of this candidate are pending. This pin does not establish deployed compatibility or public availability.
+CLI `0.1.0` targets `/api/v1` and requires server contract `1.1.0` or a compatible later `1.x` version. The [pinned OpenAPI schema, operation mapping and support policy](docs/contracts/README.md) record the exact schema and its SHA-256.
 
 ## Install
 
@@ -189,7 +189,7 @@ After upgrading the installed CLI, rerun the generation command for your shell a
 | Review lifetime checkout | `uptible billing checkout` opens the browser review page |
 | Arbitrary statistics windows and time zones | Not supported by the server |
 
-The CLI targets the pinned `1.1.0` contract candidate. Its public publication and real-server acceptance remain pending. Browser actions have explicit continuity and completion limits in the [capability reference](docs/capabilities.md). Full contract coverage, server compatibility and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
+The CLI targets the pinned `1.1.0` contract. Browser actions have explicit continuity and completion limits in the [capability reference](docs/capabilities.md).
 
 ## Development
 
@@ -223,7 +223,7 @@ brew test local/uptible/uptible
 brew audit --strict --formula local/uptible/uptible
 ```
 
-This local tap is a release rehearsal. No public Homebrew package is available yet. After the maintainer publishes and verifies the release and tap, the customer install command becomes `brew install jonbaldie/tap/uptible`. A later published version updates with `brew update` and `brew upgrade jonbaldie/tap/uptible`. Production publication, clean-machine installation from the public tap, and login against `https://uptible.com` remain unperformed Go actions in [issue #24](https://github.com/jonbaldie/uptible-cli/issues/24).
+This local tap is a release rehearsal. Customer installation and updates use the public tap described in [Install](#install).
 
 ## Update your email address
 
