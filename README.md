@@ -8,7 +8,18 @@ CLI `0.1.0` targets `/api/v1` and requires server contract `1.1.0` or a compatib
 
 ## Install
 
-You need Python 3.11 or later and pip. From a checkout of this repository, create a virtual environment and install the CLI:
+On macOS, install with [Homebrew](https://brew.sh/):
+
+```sh
+brew install jonbaldie/tap/uptible
+uptible --version
+```
+
+The formula installs Python and the CLI's dependencies in its own environment. To update the CLI, run `brew update` and `brew upgrade jonbaldie/tap/uptible`.
+
+### Install from source
+
+For development, use Python 3.11 or later and pip. From a checkout of this repository:
 
 ```sh
 python3 -m venv .venv
@@ -17,11 +28,11 @@ source .venv/bin/activate
 uptible --version
 ```
 
-This installs from the checkout. There is no published release or update channel yet. The automated tests have been exercised on macOS and Linux.
+The automated tests run on macOS and Linux.
 
 ## Connect your account
 
-This is a prerelease. The public service and distribution are not yet available. Once the service is available, run:
+Connect to your account at https://uptible.com:
 
 ```sh
 uptible auth login
