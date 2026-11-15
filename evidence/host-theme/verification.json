@@ -1,0 +1,135 @@
+{
+  "cli_source": "8b9d0392cfc27dfebd279af79b82e6aea8bab992",
+  "module_sha256": "67e92390e3c055844fddc7502a7af3a0aa13a7990ff29f2f54f881fa809c8ba7",
+  "server_contract": "1.2.0",
+  "artifact_manifest_sha256": "8b4b79873b3d6e731651f1a63e5e2cc8e4ed064c27c4e403c6eb3d097fdb666e",
+  "actual_installed_console_binary": true,
+  "actual_browser_pkce": true,
+  "account_identity_digest": "58931f1eb09f3c910543072d9724e1683972b9255a8393a9cb08c06aaedc1537",
+  "checks": [
+    {
+      "name": "Server advertises API 1.2.0 before any fixture mutation",
+      "passed": true
+    },
+    {
+      "name": "Actual browser PKCE approval connects the installed CLI to the owned account",
+      "passed": true
+    },
+    {
+      "name": "Protected account read returns that account",
+      "passed": true
+    },
+    {
+      "name": "Omitted setting creates a draft with false",
+      "passed": true
+    },
+    {
+      "name": "Show returns persisted default false",
+      "passed": true
+    },
+    {
+      "name": "Explicit enable persists true and increments revision",
+      "passed": true
+    },
+    {
+      "name": "Stale revision returns safe conflict",
+      "passed": true
+    },
+    {
+      "name": "Rejected stale disable leaves true and revision unchanged",
+      "passed": true
+    },
+    {
+      "name": "Website checkbox reflects enabled setting",
+      "passed": true
+    },
+    {
+      "name": "Omitted edit preserves saved true",
+      "passed": true
+    },
+    {
+      "name": "Explicit disable persists false",
+      "passed": true
+    },
+    {
+      "name": "Show returns persisted false after disable",
+      "passed": true
+    },
+    {
+      "name": "Website checkbox reflects disabled setting after reload",
+      "passed": true
+    },
+    {
+      "name": "Explicit enable on create persists true",
+      "passed": true
+    },
+    {
+      "name": "Exact enabled create replay returns the same draft",
+      "passed": true
+    },
+    {
+      "name": "List includes both exact persisted booleans",
+      "passed": true
+    }
+  ],
+  "cleanup": {
+    "synthetic_grant_used": false,
+    "deleted_notifications": 2,
+    "account_closed": true,
+    "post_close_home_redirects_to_login": true,
+    "credentials_removed": true,
+    "owned_notification_list_empty": true,
+    "server_logout_confirmed": true,
+    "closed_fixture_password_removed": true
+  },
+  "passed": true,
+  "failure": null,
+  "limits": [
+    "Draft configuration only. No payment, activation, capture or widget rendering claim.",
+    "Mutation concurrency uses the documented revision field. The CLI does not send an ETag header.",
+    "Registration dispatched the framework email-verification notification. Effective mailer and transport were observed as log/log. External network traffic was not monitored.",
+    "Cleanup retains the closed-account record, two idempotency-key tombstones and two session rows; all checked owned live rows and unrevoked grants are zero."
+  ],
+  "cleanup_readback": {
+    "owned_identity_confirmed": true,
+    "closed_account_tombstone": true,
+    "mail_default": "log",
+    "mail_transport": "log",
+    "live_users": 0,
+    "notifications": 0,
+    "captures": 0,
+    "tracks": 0,
+    "ingestion_receipts": 0,
+    "visitor_presence": 0,
+    "unrevoked_lifetime_grants": 0,
+    "unrevoked_access_tokens": 0,
+    "unrevoked_refresh_tokens": 0,
+    "unrevoked_auth_codes": 0,
+    "unrevoked_token_families": 0,
+    "retained_create_key_tombstones": 2,
+    "retained_session_rows": 2,
+    "account_identity_digest": "58931f1eb09f3c910543072d9724e1683972b9255a8393a9cb08c06aaedc1537"
+  },
+  "artifact_provenance": {
+    "source_revision": "8b9d0392cfc27dfebd279af79b82e6aea8bab992",
+    "module_sha256": "67e92390e3c055844fddc7502a7af3a0aa13a7990ff29f2f54f881fa809c8ba7",
+    "artifacts": {
+      "uptible_cli-0.1.0-py3-none-any.whl": "b105a2c15b88d961769fc81c73da91c40f6bdb9592d99509ac8d54bfda9925ea",
+      "uptible_cli-0.1.0.tar.gz": "2b449fa40ecfd4ed54aaf509795b12c0f54949b4ab07ce59526404d9151491ee"
+    },
+    "negative_controls": [
+      "tampered dependency hash rejected",
+      "unexpected wheel member rejected",
+      "omitted completion command rejected",
+      "broken generated shell rejected",
+      "boolean notification wire type rejected",
+      "closed event receipt rejected"
+    ],
+    "installed_suite": {
+      "tests_run": 108,
+      "passed": 107,
+      "skipped": 1,
+      "skip": "Explicit opt-in deployed integration; a separate real deployed run is recorded here"
+    }
+  }
+}
