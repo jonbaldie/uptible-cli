@@ -191,7 +191,7 @@ After upgrading the installed CLI, rerun the generation command for your shell a
 | Review lifetime checkout | `uptible billing checkout` opens the browser review page |
 | Arbitrary statistics windows and time zones | Not supported by the server |
 
-The CLI targets the pinned `1.1.0` contract candidate. Its public publication and real-server acceptance remain pending. Browser actions have explicit continuity and completion limits in the [capability reference](docs/capabilities.md). Full contract coverage, server compatibility and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
+The CLI targets the pinned `1.2.0` contract candidate. Commands omitting the optional host appearance setting retain their `1.1.0` compatibility. Public publication and real-server acceptance remain pending. Browser actions have explicit continuity and completion limits in the [capability reference](docs/capabilities.md). Full contract coverage, server compatibility and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
 
 ## Development
 
