@@ -342,7 +342,7 @@ class Server(BaseHTTPRequestHandler):
                 if query.get('cursor') == ['claim-next'] or query.get('claim_cursor') == ['order-next']:
                     self.respond({'errors': {'cursor': ['invalid']}}, 422)
                 else:
-                    self.respond({'live_access': True, 'purchase_eligible': False, 'orders': [], 'claim_references': [], 'next_cursor': None if 'cursor' in query else 'order-next', 'next_claim_cursor': None if 'claim_cursor' in query else 'claim-next'})
+                    self.respond({'live_access': True, 'purchase_eligible': False, 'handoffs': {'checkout': '/billing', 'receipts': 'https://app.lemonsqueezy.com/my-orders'}, 'orders': [], 'claim_references': [], 'next_cursor': None if 'cursor' in query else 'order-next', 'next_claim_cursor': None if 'claim_cursor' in query else 'claim-next'})
             return
         if self.path == '/api/v1/statistics':
             self.operations.append(('GET', self.path))
@@ -628,6 +628,19 @@ urllib.request.urlopen(url, timeout=5).read()
         result, body = self.run_cli('account', 'security', '--browser-driver', str(self.path / 'missing'))
         self.assertEqual((result.returncode, body['error']['code']), (1, 'browser_failed'))
 
+    def test_receipt_handoff_opens_public_provider_page_without_credentials(self):
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        opened = self.path / 'receipt-url'
+        self.driver.write_text('#!/usr/bin/env python3\nimport pathlib,sys\npathlib.Path(' + repr(str(opened)) + ').write_text(sys.argv[1])\n')
+        result, body = self.run_cli('billing', 'receipts', '--browser-driver', str(self.driver))
+        self.assertEqual(result.returncode, 0, body)
+        self.assertEqual(body['url'], 'https://app.lemonsqueezy.com/my-orders')
+        self.assertFalse(body['completed'])
+        deadline = time.monotonic() + 3
+        while not opened.exists() and time.monotonic() < deadline:
+            time.sleep(.01)
+        self.assertEqual(opened.read_text(), body['url'])
+
     def test_browser_handoff_rejects_unsafe_issuer_before_any_browser_or_connection(self):
         for issuer in ['http://example.test', 'https://name:secret@example.test', 'https://example.test/path',
                        'https://example.test?token=private', 'https://example.test#fragment',
@@ -873,6 +886,7 @@ urllib.request.urlopen(url, timeout=5).read()
         result, body = self.run_cli('billing', 'status', '--cursor', 'a+/=', '--claim-cursor', 'b+/=')
         self.assertEqual(result.returncode, 0)
         self.assertTrue(body['live_access'])
+        self.assertEqual(body['handoffs'], {'checkout': '/billing', 'receipts': 'https://app.lemonsqueezy.com/my-orders'})
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(Server.operations[-1][1]).query)
         self.assertEqual(query, {'cursor': ['a+/='], 'claim_cursor': ['b+/=']})
         first = self.run_cli('billing', 'status')[1]
