@@ -698,8 +698,9 @@ def build_parser():
     status = billing.add_parser("status", description="Read billing status. Purchase eligibility does not guarantee checkout availability.")
     status.add_argument("--cursor", help="next_cursor for older orders")
     status.add_argument("--claim-cursor", help="next_claim_cursor for older purchase references")
-    for action in ("checkout", "open", "receipts"):
+    for action in ("checkout", "open"):
         browser_option(billing.add_parser(action, description="Open billing in the browser. Check the browser account, then complete any checkout or payment confirmation there. Opening a page does not confirm payment."))
+    browser_option(billing.add_parser("receipts", description="Open Lemon Squeezy My Orders. Sign in with the email used at checkout."))
     notifications = sub.add_parser("notifications", help="manage notifications").add_subparsers(dest="action", required=True)
     listing = notifications.add_parser("list")
     listing.add_argument("--limit", type=positive, default=20, choices=range(1, 101), metavar="1-100")
