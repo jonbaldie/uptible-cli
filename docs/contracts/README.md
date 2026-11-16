@@ -39,6 +39,10 @@ CLI and package versions are independent of the server contract version. Before 
 | `post_api_v1_notifications_id_capture` | `events capture` | `events:write` |
 | `post_api_v1_notifications_id_track` | `events track` | `events:write` |
 
+### Compatible 1.3.0 additions
+
+The 1.3.0 candidate adds `get_api_v1_me` (`GET /api/v1/me`) as an account-read alias. `account show` already provides the same capability through `GET /api/v1/account` with `account:read`, so the CLI does not need a second command. The 1.3.0 schema also adds a first-party session authentication alternative and an optional lead `view` filter. Session authentication remains a browser-only alternative; the CLI continues using OAuth. The optional `view` filter has no CLI flag in this release. These additions do not change the pinned 1.2.0 operation mapping or establish deployed compatibility.
+
 ## Check consumer compatibility
 
 Run the installed CLI tests outside the source checkout with the checkout's tests directory. The artifact verifier does this automatically. The tests launch actual installed CLI subprocesses against an isolated synthetic HTTP service, inspect each outgoing method, path, header, filter and JSON payload, and validate them against the pinned schema. Every pinned management operation must have one mapped command. A real synthetic OAuth journey checks that requested scopes cover the mapping. Success fixtures include unknown response fields, including email acknowledgements and event receipts.
