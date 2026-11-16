@@ -19,6 +19,15 @@ uptible --version
 
 This installs from the checkout. There is no published release or update channel yet. The automated tests have been exercised on macOS and Linux.
 
+To update a checkout installation, first update the checkout to the revision you want. Then run these commands from the repository directory:
+
+```sh
+.venv/bin/python -m pip install --upgrade .
+.venv/bin/uptible --version
+```
+
+The version command reports the installed package version. Reinstalling a different checkout revision with the same package version does not identify that revision.
+
 ## Connect your account
 
 This is a prerelease. The public service and distribution are not yet available. Once the service is available, run:
