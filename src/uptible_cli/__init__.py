@@ -580,12 +580,13 @@ BROWSER_ACTIONS = {
     ("installation", "open"): ("/install", "Review installation instructions and tracking status."),
     ("billing", "checkout"): ("/billing", "Review the single $99 lifetime offer and confirm checkout in the browser. Opening this page does not purchase access. Return to billing status to check server access."),
     ("billing", "open"): ("/billing", "Review billing history, payment reconciliation or purchase claims. Complete any required confirmations in the browser."),
+    ("billing", "receipts"): ("https://app.lemonsqueezy.com/my-orders", "Sign in with the email used at checkout. Lemon Squeezy sends a sign-in link."),
 }
 
 
 def browser_handoff(args, issuer, connected_id):
     path, instruction = BROWSER_ACTIONS[(args.command, args.action)]
-    url = issuer + path
+    url = path if (args.command, args.action) == ("billing", "receipts") else issuer + path
     try:
         if args.browser_driver:
             subprocess.Popen([args.browser_driver, url], close_fds=True)
@@ -593,9 +594,10 @@ def browser_handoff(args, issuer, connected_id):
             raise OSError()
     except OSError:
         raise Failure("browser_failed", "Could not open a browser. Set a default browser and retry. No browser action was confirmed.") from None
+    next_step = instruction if (args.command, args.action) == ("billing", "receipts") else "The browser has its own session. Compare its signed-in identity with account show before submitting a form. " + instruction
     result = {"browser_launch_requested": True, "url": url, "completed": False,
               "account_binding_verified": False, "connected_account_id": connected_id,
-              "next_step": "The browser has its own session. Compare its signed-in identity with account show before submitting a form. " + instruction}
+              "next_step": next_step}
     if args.command == "notifications":
         result["notification_id"] = args.id
     return result
@@ -698,6 +700,7 @@ def build_parser():
     status.add_argument("--claim-cursor", help="next_claim_cursor for older purchase references")
     for action in ("checkout", "open"):
         browser_option(billing.add_parser(action, description="Open billing in the browser. Check the browser account, then complete any checkout or payment confirmation there. Opening a page does not confirm payment."))
+    browser_option(billing.add_parser("receipts", description="Open Lemon Squeezy My Orders. Sign in with the email used at checkout."))
     notifications = sub.add_parser("notifications", help="manage notifications").add_subparsers(dest="action", required=True)
     listing = notifications.add_parser("list")
     listing.add_argument("--limit", type=positive, default=20, choices=range(1, 101), metavar="1-100")

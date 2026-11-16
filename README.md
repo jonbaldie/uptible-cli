@@ -62,6 +62,7 @@ When first connecting, add `--events` to request event submission permission or 
 uptible events capture 123 --session-id visit-123 --event-id signup-123 --email person@example.com
 uptible events track 123 --session-id visit-123 --event-id view-123
 uptible billing status
+uptible billing receipts
 ```
 
 Event IDs and session IDs are required. Choose stable IDs yourself. If submission returns an uncertain result, retry the exact notification, operation, IDs, and payload. A `processed` receipt confirms processing. A different capture payload for the same identity conflicts. Only live notifications owned by the connected account and covered by lifetime access can accept events.
@@ -198,6 +199,7 @@ After upgrading the installed CLI, rerun the generation command for your shell a
 | Request email update and confirm it | `uptible account update --email ADDRESS`, `uptible account confirm-email` |
 | Settings, security and onboarding | `uptible account settings`, `uptible account security`, `uptible account onboarding` |
 | Review lifetime checkout | `uptible billing checkout` opens the browser review page |
+| Find receipts | `uptible billing receipts` opens Lemon Squeezy My Orders |
 | Arbitrary statistics windows and time zones | Not supported by the server |
 
 The CLI targets the pinned `1.2.0` contract candidate. Commands omitting the optional host appearance setting retain their `1.1.0` compatibility. Public publication and real-server acceptance remain pending. Browser actions have explicit continuity and completion limits in the [capability reference](docs/capabilities.md). Full contract coverage, server compatibility and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
@@ -253,9 +255,9 @@ Invalid, expired, replaced or used codes do not change the address. If the reque
 
 ## Open browser actions
 
-Use `account settings`, `account security`, `account onboarding`, `installation open`, `notifications preview ID`, `billing checkout`, or `billing open`. The [capability reference](docs/capabilities.md) lists their routes and limits.
+Use `account settings`, `account security`, `account onboarding`, `installation open`, `notifications preview ID`, `billing checkout`, `billing open`, or `billing receipts`. The [capability reference](docs/capabilities.md) lists their routes and limits.
 
-These commands open a fixed page on your selected service. The browser has an independent session. Compare its identity with `account show` before you submit a form. Opening the page does not confirm that a setting changed, a preview rendered or a payment completed. Handoff JSON reports `completed: false` and `account_binding_verified: false` because the service has no account-bound return receipt.
+These commands open a fixed page on your selected service, except `billing receipts`, which opens Lemon Squeezy My Orders. Sign in there with the email used at checkout. The browser has an independent session. Before submitting an Uptible form, compare its signed-in identity with `account show`. The checkout email used for receipts may differ from your Uptible account email. Opening the page does not confirm that a setting changed, a preview rendered or a payment completed. Handoff JSON reports `completed: false` and `account_binding_verified: false` because the service has no account-bound return receipt.
 
 ## Run the opt-in test account suite
 
