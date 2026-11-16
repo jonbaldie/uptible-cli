@@ -257,7 +257,7 @@ Invalid, expired, replaced or used codes do not change the address. If the reque
 
 Use `account settings`, `account security`, `account onboarding`, `installation open`, `notifications preview ID`, `billing checkout`, `billing open`, or `billing receipts`. The [capability reference](docs/capabilities.md) lists their routes and limits.
 
-These commands open a fixed page on your selected service, except `billing receipts`, which opens Lemon Squeezy My Orders. Sign in there with the email used at checkout. The browser has an independent session. Compare its identity with `account show` before you submit a form. Opening the page does not confirm that a setting changed, a preview rendered or a payment completed. Handoff JSON reports `completed: false` and `account_binding_verified: false` because the service has no account-bound return receipt.
+These commands open a fixed page on your selected service, except `billing receipts`, which opens Lemon Squeezy My Orders. Sign in there with the email used at checkout. The browser has an independent session. Before submitting an Uptible form, compare its signed-in identity with `account show`. The checkout email used for receipts may differ from your Uptible account email. Opening the page does not confirm that a setting changed, a preview rendered or a payment completed. Handoff JSON reports `completed: false` and `account_binding_verified: false` because the service has no account-bound return receipt.
 
 ## Run the opt-in test account suite
 
