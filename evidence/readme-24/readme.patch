@@ -1,13 +1,13 @@
 diff --git a/README.md b/README.md
-index 614ee3f..2983823 100644
+index 35e9d90..c86442e 100644
 --- a/README.md
 +++ b/README.md
 @@ -4,11 +4,22 @@ Use `uptible` to connect an Uptible account from your terminal, check the connec
  
  ## API compatibility
  
--CLI `0.1.0` targets `/api/v1` and requires server contract `1.1.0` or a compatible later `1.x` version. The [pinned OpenAPI candidate, operation mapping and support policy](docs/contracts/README.md) record the exact schema and its SHA-256. Public server publication and independent acceptance of this candidate are pending. This pin does not establish deployed compatibility or public availability.
-+CLI `0.1.0` targets `/api/v1` and requires server contract `1.1.0` or a compatible later `1.x` version. The [pinned OpenAPI schema, operation mapping and support policy](docs/contracts/README.md) record the exact schema and its SHA-256.
+-CLI `0.1.0` targets `/api/v1` and pins server contract `1.2.0`. Existing commands without the host appearance setting remain compatible with `1.1.0` and compatible later `1.x` versions. Explicit host appearance changes require an advertised contract of at least `1.2.0` within major `1`. The [pinned OpenAPI candidate, operation mapping and support policy](docs/contracts/README.md) record the exact schema and its SHA-256. Public server publication and independent acceptance of this candidate are pending. This pin does not establish deployed compatibility or public availability.
++CLI `0.1.0` targets `/api/v1` and pins server contract `1.2.0`. Existing commands without the host appearance setting remain compatible with `1.1.0` and compatible later `1.x` versions. Explicit host appearance changes require an advertised contract of at least `1.2.0` within major `1`. The [pinned OpenAPI schema, operation mapping and support policy](docs/contracts/README.md) record the exact schema and its SHA-256.
  
  ## Install
  
@@ -41,16 +41,25 @@ index 614ee3f..2983823 100644
  
  ```sh
  uptible auth login
-@@ -178,7 +189,7 @@ After upgrading the installed CLI, rerun the generation command for your shell a
+@@ -164,7 +175,7 @@ source ~/.local/share/uptible/completion.zsh
+ 
+ Add those last three lines to `~/.zshrc`. If your configuration already runs `compinit`, add only the `source` line after it. Zsh 5.9 is exercised by the shell checks.
+ 
+-In either shell, type `uptible no` and press Tab to complete `notifications`. Type `uptible auth lo` and press Tab twice to see `login` and `logout`. Type `uptible leads list --limit 9` and press Tab twice for the matching fixed numeric choices. `uptible notifications edit 123 --no-` completes `--no-display-maps-only`.
++In either shell, type `uptible no` and press Tab to complete `notifications`. Type `uptible auth lo` and press Tab twice to see `login` and `logout`. Type `uptible leads list --limit 9` and press Tab twice for the matching fixed numeric choices. `uptible notifications edit 123 --no-d` completes `--no-display-maps-only`.
+ 
+ After upgrading the installed CLI, rerun the generation command for your shell and source the resulting file again. Candidates come from the installed parser on each Tab press. Use `uptible completion --help` to find the supported shells. Generation and querying require the installed `uptible` executable on `PATH`.
+ 
+@@ -191,7 +202,7 @@ After upgrading the installed CLI, rerun the generation command for your shell a
  | Review lifetime checkout | `uptible billing checkout` opens the browser review page |
  | Arbitrary statistics windows and time zones | Not supported by the server |
  
--The CLI targets the pinned `1.1.0` contract candidate. Its public publication and real-server acceptance remain pending. Browser actions have explicit continuity and completion limits in the [capability reference](docs/capabilities.md). Full contract coverage, server compatibility and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
-+The CLI targets the pinned `1.1.0` contract. Browser actions have explicit continuity and completion limits in the [capability reference](docs/capabilities.md).
+-The CLI targets the pinned `1.2.0` contract candidate. Commands omitting the optional host appearance setting retain their `1.1.0` compatibility. Public publication and real-server acceptance remain pending. Browser actions have explicit continuity and completion limits in the [capability reference](docs/capabilities.md). Full contract coverage, server compatibility and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
++The CLI targets the pinned `1.2.0` contract. Commands omitting the optional host appearance setting retain their `1.1.0` compatibility. Browser actions have explicit continuity and completion limits in the [capability reference](docs/capabilities.md).
  
  ## Development
  
-@@ -212,7 +223,7 @@ brew test local/uptible/uptible
+@@ -225,7 +236,7 @@ brew test local/uptible/uptible
  brew audit --strict --formula local/uptible/uptible
  ```
  
