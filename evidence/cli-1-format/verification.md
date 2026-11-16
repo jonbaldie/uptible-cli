@@ -18,3 +18,9 @@ head sdist  0b8ae0f853f8bbe5d9c543eae7f9f8207393629781c0810b8a71edfa0b063d24
 ```
 
 Gitleaks scanned the extracted wheel and sdist for each commit and reported no leaks. These are candidate artifacts; no release was published.
+
+## Installed candidate against an isolated service
+
+The exact head wheel identified above was installed into a clean Python 3.14 environment and exercised against a fresh isolated application with a disposable synthetic account. The service advertised API contract version 1.3.0. With `BROWSER` unset, the installed client opened the system browser for PKCE login and consent. An opt-in integration run passed four tests, including account read, draft creation and idempotent replay, listing, archive, restore, deletion, lead query, statistics, installation read, and logout. Three tests covered target guards.
+
+A separate run exercised draft archive and restore readbacks, an owned synthetic lead detail and deletion, and post-deletion 404 readbacks. It forced the locally stored access-token expiry, then observed real refresh rotation, server logout and rejection of the revoked access token. This is not a natural server-expiry test. The documented restrictive-file credential fallback was used. The synthetic lead was seeded; visitor ingestion was not tested. The disposable service and its data were removed after testing. This local run does not establish deployed-service compatibility or provider behavior.
