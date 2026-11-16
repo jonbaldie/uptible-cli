@@ -9,4 +9,6 @@ The complete before/after diff is attached as `readme.patch` beside this report.
 
 Independent Gemini 4 Argon Medium review passed the integration before the one-character completion correction. A fresh GPT-6.1 Sol review of the final candidate returned PASS+NOTES for draft preparation through the native Codex agent runtime.
 
+Exact-head CI passed on Python 3.11, 3.12, 3.13, and 3.14 in [artifact verification](https://github.com/jonbaldie/uptible-cli/actions/runs/43778009902). The [release rehearsal](https://github.com/jonbaldie/uptible-cli/actions/runs/43778009906) passed its build and macOS Homebrew install, test, and audit checks. Publication was skipped because this is not a release tag.
+
 This is a future post-Go README. No release publication, public formula availability, clean macOS installation or production authentication is established by this evidence. Issue #24 remains open. Keep PR #32 draft until CLI v0.1.0 and the formula are published and the clean macOS README install plus production authentication checks pass. There is no executable behavior change.
