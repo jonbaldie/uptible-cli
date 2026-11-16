@@ -4,11 +4,22 @@ Use `uptible` to connect an Uptible account from your terminal, check the connec
 
 ## API compatibility
 
-CLI `0.1.0` targets `/api/v1` and pins server contract `1.2.0`. Existing commands without the host appearance setting remain compatible with `1.1.0` and compatible later `1.x` versions. Explicit host appearance changes require an advertised contract of at least `1.2.0` within major `1`. The [pinned OpenAPI candidate, operation mapping and support policy](docs/contracts/README.md) record the exact schema and its SHA-256. Public server publication and independent acceptance of this candidate are pending. This pin does not establish deployed compatibility or public availability.
+CLI `0.1.0` targets `/api/v1` and pins server contract `1.2.0`. Existing commands without the host appearance setting remain compatible with `1.1.0` and compatible later `1.x` versions. Explicit host appearance changes require an advertised contract of at least `1.2.0` within major `1`. The [pinned OpenAPI schema, operation mapping and support policy](docs/contracts/README.md) record the exact schema and its SHA-256.
 
 ## Install
 
-You need Python 3.11 or later and pip. From a checkout of this repository, create a virtual environment and install the CLI:
+On macOS, install with [Homebrew](https://brew.sh/):
+
+```sh
+brew install jonbaldie/tap/uptible
+uptible --version
+```
+
+The formula installs Python and the CLI's dependencies in its own environment. To update the CLI, run `brew update` and `brew upgrade jonbaldie/tap/uptible`.
+
+### Install from source
+
+For development, use Python 3.11 or later and pip. From a checkout of this repository:
 
 ```sh
 python3 -m venv .venv
@@ -17,7 +28,7 @@ source .venv/bin/activate
 uptible --version
 ```
 
-This installs from the checkout. There is no published release or update channel yet. The automated tests have been exercised on macOS and Linux.
+The automated tests run on macOS and Linux.
 
 To update a checkout installation, first update the checkout to the revision you want. Then run these commands from the repository directory:
 
@@ -30,7 +41,7 @@ The version command reports the installed package version. Reinstalling a differ
 
 ## Connect your account
 
-This is a prerelease. The public service and distribution are not yet available. Once the service is available, run:
+Connect to your account at https://uptible.com:
 
 ```sh
 uptible auth login
@@ -173,7 +184,7 @@ source ~/.local/share/uptible/completion.zsh
 
 Add those last three lines to `~/.zshrc`. If your configuration already runs `compinit`, add only the `source` line after it. Zsh 5.9 is exercised by the shell checks.
 
-In either shell, type `uptible no` and press Tab to complete `notifications`. Type `uptible auth lo` and press Tab twice to see `login` and `logout`. Type `uptible leads list --limit 9` and press Tab twice for the matching fixed numeric choices. `uptible notifications edit 123 --no-` completes `--no-display-maps-only`.
+In either shell, type `uptible no` and press Tab to complete `notifications`. Type `uptible auth lo` and press Tab twice to see `login` and `logout`. Type `uptible leads list --limit 9` and press Tab twice for the matching fixed numeric choices. `uptible notifications edit 123 --no-d` completes `--no-display-maps-only`.
 
 After upgrading the installed CLI, rerun the generation command for your shell and source the resulting file again. Candidates come from the installed parser on each Tab press. Use `uptible completion --help` to find the supported shells. Generation and querying require the installed `uptible` executable on `PATH`.
 
@@ -200,7 +211,7 @@ After upgrading the installed CLI, rerun the generation command for your shell a
 | Review lifetime checkout | `uptible billing checkout` opens the browser review page |
 | Arbitrary statistics windows and time zones | Not supported by the server |
 
-The CLI targets the pinned `1.2.0` contract candidate. Commands omitting the optional host appearance setting retain their `1.1.0` compatibility. Public publication and real-server acceptance remain pending. Browser actions have explicit continuity and completion limits in the [capability reference](docs/capabilities.md). Full contract coverage, server compatibility and distribution remain open in [issue #1](https://github.com/jonbaldie/uptible-cli/issues/1).
+The CLI targets the pinned `1.2.0` contract. Commands omitting the optional host appearance setting retain their `1.1.0` compatibility. Browser actions have explicit continuity and completion limits in the [capability reference](docs/capabilities.md).
 
 ## Development
 
@@ -234,7 +245,7 @@ brew test local/uptible/uptible
 brew audit --strict --formula local/uptible/uptible
 ```
 
-This local tap is a release rehearsal. No public Homebrew package is available yet. After the maintainer publishes and verifies the release and tap, the customer install command becomes `brew install jonbaldie/tap/uptible`. A later published version updates with `brew update` and `brew upgrade jonbaldie/tap/uptible`. Production publication, clean-machine installation from the public tap, and login against `https://uptible.com` remain unperformed Go actions in [issue #24](https://github.com/jonbaldie/uptible-cli/issues/24).
+This local tap is a release rehearsal. Customer installation and updates use the public tap described in [Install](#install).
 
 ## Update your email address
 
