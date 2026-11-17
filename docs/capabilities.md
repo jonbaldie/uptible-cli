@@ -1,6 +1,6 @@
 # Command and browser capability reference
 
-The management API uses `/api/v1`. CLI `0.1.0` pins contract candidate `1.2.0`. Explicit host appearance changes require an advertised contract of at least `1.2.0` within major `1`; commands omitting that setting retain their `1.1.0` compatibility. Public publication and independent acceptance remain pending. The [contract reference](contracts/README.md) maps every management operation ID to its command and records verification limits. This table records implemented commands and browser boundaries.
+The management API uses `/api/v1`. CLI `0.1.1` pins contract candidate `1.2.0`. Explicit host appearance changes require an advertised contract of at least `1.2.0` within major `1`; commands omitting that setting retain their `1.1.0` compatibility. Public publication and independent acceptance remain pending. The [contract reference](contracts/README.md) maps every management operation ID to its command and records verification limits. This table records implemented commands and browser boundaries.
 
 | Capability | Command | Protocol and completion |
 | --- | --- | --- |
