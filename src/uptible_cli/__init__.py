@@ -258,7 +258,7 @@ def authorize(issuer, client, browser, timeout, delete_leads=False, events=False
         def launch():
             try:
                 if browser:
-                    subprocess.Popen([browser, url], close_fds=True)
+                    subprocess.Popen([browser, url], close_fds=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 elif not webbrowser.open(url):
                     result["error"] = "browser_failed"
             except OSError:
@@ -589,7 +589,7 @@ def browser_handoff(args, issuer, connected_id):
     url = path if (args.command, args.action) == ("billing", "receipts") else issuer + path
     try:
         if args.browser_driver:
-            subprocess.Popen([args.browser_driver, url], close_fds=True)
+            subprocess.Popen([args.browser_driver, url], close_fds=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         elif not webbrowser.open(url):
             raise OSError()
     except OSError:

@@ -2025,10 +2025,16 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(body['error']['code'], 'state_mismatch')
         self.assertFalse(self.creds.exists())
     def test_denial_and_timeout_do_not_save(self):
-        for extra, expected in [({'DENY': '1'}, 'authorization_denied'), ({'NO_CALLBACK': '1'}, 'callback_timeout')]:
-            result, body = self.run_cli('auth', 'login', '--browser-driver', str(self.driver), '--callback-timeout', '1', env=dict(os.environ, **extra))
+        for extra, expected, timeout in [({'DENY': '1'}, 'authorization_denied', '5'), ({'NO_CALLBACK': '1'}, 'callback_timeout', '1')]:
+            result, body = self.run_cli('auth', 'login', '--browser-driver', str(self.driver), '--callback-timeout', timeout, env=dict(os.environ, **extra))
             self.assertEqual(body['error']['code'], expected)
             self.assertFalse(self.creds.exists())
+    def test_late_browser_driver_does_not_corrupt_json_output(self):
+        self.driver.write_text("#!/usr/bin/env python3\nimport sys, time\ntime.sleep(2)\nprint('late browser output', file=sys.stderr)\n")
+        result = subprocess.run(self.base + ['auth', 'login', '--browser-driver', str(self.driver), '--callback-timeout', '1'], capture_output=True, text=True, timeout=10)
+        self.assertEqual(json.loads(result.stderr)['error']['code'], 'callback_timeout')
+        self.assertFalse(self.creds.exists())
+
     def test_private_file_and_connection_identity(self):
         self.creds.write_text('{}')
         self.creds.chmod(0o644)
