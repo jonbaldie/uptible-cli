@@ -1,6 +1,6 @@
 # CLI API compatibility reference
 
-CLI `0.1.0` targets management API major `1` at `/api/v1`. Its pinned server contract is `1.2.0`, expressed as a public semantic contract version rather than an application build number. OAuth must also be enabled and the public client registered on the selected service.
+CLI `0.1.1` targets management API major `1` at `/api/v1`. Its pinned server contract is `1.2.0`, expressed as a public semantic contract version rather than an application build number. OAuth must also be enabled and the public client registered on the selected service.
 
 The bundled OpenAPI 3.0.3 candidate is [v1.2.0.json](v1.2.0.json). [manifest.json](manifest.json) pins its version and SHA-256. The exact candidate SHA-256 is `f193da2278a507fffc9630f146dbb42b1221ff30706879af9339c95f7c849a19`.
 

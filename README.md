@@ -4,7 +4,7 @@ Use `uptible` to connect an Uptible account from your terminal, check the connec
 
 ## API compatibility
 
-CLI `0.1.0` targets `/api/v1` and pins server contract `1.2.0`. Existing commands without the host appearance setting remain compatible with `1.1.0` and compatible later `1.x` versions. Explicit host appearance changes require an advertised contract of at least `1.2.0` within major `1`. The [pinned OpenAPI candidate, operation mapping and support policy](docs/contracts/README.md) record the exact schema and its SHA-256. Public server publication and independent acceptance of this candidate are pending. This pin does not establish deployed compatibility or public availability.
+CLI `0.1.1` targets `/api/v1` and pins server contract `1.2.0`. Existing commands without the host appearance setting remain compatible with `1.1.0` and compatible later `1.x` versions. Explicit host appearance changes require an advertised contract of at least `1.2.0` within major `1`. The [pinned OpenAPI candidate, operation mapping and support policy](docs/contracts/README.md) record the exact schema and its SHA-256. Public server publication and independent acceptance of this candidate are pending. This pin does not establish deployed compatibility or public availability.
 
 ## Install
 
@@ -228,8 +228,8 @@ To rehearse Homebrew locally without publishing, use the verified source archive
 ```sh
 verified=/absolute/path/to/uptible-verified
 brew tap-new --no-git local/uptible
-python3 scripts/homebrew-formula.py --version 0.1.0 \
-  --sdist "$verified/uptible_cli-0.1.0.tar.gz" --url "file://$verified/uptible_cli-0.1.0.tar.gz" \
+python3 scripts/homebrew-formula.py --version 0.1.1 \
+  --sdist "$verified/uptible_cli-0.1.1.tar.gz" --url "file://$verified/uptible_cli-0.1.1.tar.gz" \
   > "$(brew --repository)/Library/Taps/local/homebrew-uptible/Formula/uptible.rb"
 brew install local/uptible/uptible
 brew test local/uptible/uptible

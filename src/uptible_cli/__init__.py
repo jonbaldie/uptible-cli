@@ -23,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from filelock import FileLock, Timeout
 from keyring.errors import KeyringError
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 DEFAULT_ISSUER = "https://uptible.com"
 DEFAULT_CLIENT_ID = "5af9087d-4c3a-4bb9-a144-3cbf5560771a"
 SERVER_ERRORS = {"invalid_request", "invalid_client", "invalid_grant", "unauthorized_client", "unsupported_grant_type", "invalid_scope", "access_denied", "temporarily_unavailable", "server_error"}
