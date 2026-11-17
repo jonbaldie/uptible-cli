@@ -2042,6 +2042,21 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(json.loads(result.stderr)['error']['code'], 'callback_timeout')
         self.assertFalse(self.creds.exists())
 
+    def test_terminal_browser_receives_interactive_streams(self):
+        import pty
+        marker = self.path / 'terminal-streams'
+        self.driver.write_text("#!/usr/bin/env python3\nimport os, sys\nopen(" + repr(str(marker)) + ", 'w').write(str(all(os.isatty(i) for i in (0, 1, 2))) + ':' + input())\n")
+        master, slave = pty.openpty()
+        try:
+            base = [arg for arg in self.base if arg != '--json']
+            os.write(master, b'hello browser\n')
+            result = subprocess.run(base + ['auth', 'login', '--browser-driver', str(self.driver), '--callback-timeout', '5'], stdin=slave, stdout=slave, stderr=slave, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(marker.read_text(), 'True:hello browser')
+        finally:
+            os.close(master)
+            os.close(slave)
+
     def test_private_file_and_connection_identity(self):
         self.creds.write_text('{}')
         self.creds.chmod(0o644)
