@@ -813,7 +813,7 @@ urllib.request.urlopen(url, timeout=5).read()
         Server.jwt_mode = True
         self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
         original = self.creds.read_text()
-        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, add=True, delete_leads=False, delete_notifications=False, email_change=False, events=True, billing=False, browser_driver=str(self.driver))
+        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, json=False, add=True, delete_leads=False, delete_notifications=False, email_change=False, events=True, billing=False, browser_driver=str(self.driver))
         with patch.object(uptible_cli.Store, 'write', side_effect=OSError('disk failure')):
             with self.assertRaises(OSError):
                 uptible_cli.run(args)
@@ -846,7 +846,7 @@ urllib.request.urlopen(url, timeout=5).read()
         Server.jwt_mode = True
         self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
         original = self.creds.read_text()
-        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, add=True, delete_leads=False, delete_notifications=False, email_change=False, events=True, billing=False, browser_driver=str(self.driver))
+        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, json=False, add=True, delete_leads=False, delete_notifications=False, email_change=False, events=True, billing=False, browser_driver=str(self.driver))
         write = uptible_cli.Store.write
         def save_then_fail(store, value):
             write(store, value)
