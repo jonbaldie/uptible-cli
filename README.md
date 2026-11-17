@@ -40,7 +40,7 @@ uptible account show
 
 The CLI opens your browser for authorization and listens for the response on a temporary loopback port. Approve access in the browser. The command then displays your account. If your browser cannot open, set a default browser and retry. A browser and a loopback connection are required.
 
-When refresh is enabled on the server, the CLI refreshes an expired access credential automatically. It verifies the refreshed account before saving the rotated credential. The same check applies when a request triggers a refresh after HTTP 401.
+When refresh is enabled on the server, the CLI refreshes an expired access credential automatically. It verifies the refreshed account before saving the rotated credential. The same check applies when a request triggers a refresh after HTTP 401. If the server does not issue refresh credentials, the connection works until the access credential expires or is rejected. Revoke the connection on your account page, run `auth logout --local`, and log in again with the same connection options.
 
 ## Browse and delete leads
 

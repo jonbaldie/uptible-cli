@@ -194,10 +194,13 @@ class Store:
             raise Failure("wrong_connection", "Credential file belongs to another connection.")
         return value
 
-    def validate(self, token):
-        if not isinstance(token, dict) or not isinstance(token.get("access_token"), str) or not isinstance(token.get("refresh_token"), str) or not isinstance(token.get("expires_in"), (int, float)) or token["expires_in"] <= 0:
-            raise Failure("invalid_token_response", "Server did not return usable access and refresh credentials.", 3)
-        return {"identity": self.identity, "access_token": token["access_token"], "refresh_token": token["refresh_token"], "expires_at": time.time() + token["expires_in"]}
+    def validate(self, token, require_refresh=False):
+        if not isinstance(token, dict) or not isinstance(token.get("access_token"), str) or not token["access_token"] or not isinstance(token.get("expires_in"), (int, float)) or token["expires_in"] <= 0:
+            raise Failure("invalid_token_response", "Server did not return usable credentials.", 3)
+        refresh = token.get("refresh_token")
+        if (refresh is not None and (not isinstance(refresh, str) or not refresh)) or (require_refresh and not refresh):
+            raise Failure("invalid_token_response", "Server did not return usable refresh credentials.", 3)
+        return {"identity": self.identity, "access_token": token["access_token"], "refresh_token": refresh, "expires_at": time.time() + token["expires_in"]}
 
     def write(self, value):
         encoded = json.dumps(value)
@@ -320,6 +323,8 @@ def recovery_instructions(args):
     return "Revoke the connection in your account, then run these commands to reconnect:\n" + logout + "\n" + login
 
 def refresh_connection(issuer, client, store, original, recovery, scopes=None):
+    if not original.get("refresh_token"):
+        raise Failure("reauthorization_required", "This connection has no refresh credential. " + recovery, 3)
     old_id = original.get("account_id")
     if type(old_id) is not int:
         try:
@@ -328,7 +333,7 @@ def refresh_connection(issuer, client, store, original, recovery, scopes=None):
             raise exc.reframe(exc.code, exc.message + " " + recovery, exc.exit_code) from None
     original["refresh_pending"] = True
     store.write(original)
-    refreshed = store.validate(request(issuer + "/oauth/token", {"grant_type":"refresh_token", "client_id":client, "refresh_token":original["refresh_token"]}))
+    refreshed = store.validate(request(issuer + "/oauth/token", {"grant_type":"refresh_token", "client_id":client, "refresh_token":original["refresh_token"]}), require_refresh=True)
     try:
         if scopes is not None:
             refreshed_scopes = granted_scopes(refreshed["access_token"])
