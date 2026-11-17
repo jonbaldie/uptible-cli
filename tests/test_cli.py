@@ -2035,6 +2035,13 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(json.loads(result.stderr)['error']['code'], 'callback_timeout')
         self.assertFalse(self.creds.exists())
 
+    def test_default_browser_output_does_not_corrupt_json(self):
+        self.driver.write_text("#!/usr/bin/env python3\nimport sys, time\ntime.sleep(2)\nprint('late browser output', file=sys.stderr)\n")
+        env = dict(os.environ, BROWSER=str(self.driver))
+        result = subprocess.run(self.base + ['auth', 'login', '--callback-timeout', '1'], capture_output=True, text=True, env=env, timeout=10)
+        self.assertEqual(json.loads(result.stderr)['error']['code'], 'callback_timeout')
+        self.assertFalse(self.creds.exists())
+
     def test_private_file_and_connection_identity(self):
         self.creds.write_text('{}')
         self.creds.chmod(0o644)

@@ -17,7 +17,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from filelock import FileLock, Timeout
@@ -259,7 +258,7 @@ def authorize(issuer, client, browser, timeout, delete_leads=False, events=False
             try:
                 if browser:
                     subprocess.Popen([browser, url], close_fds=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                elif not webbrowser.open(url):
+                elif not open_browser(url):
                     result["error"] = "browser_failed"
             except OSError:
                 result["error"] = "browser_failed"
@@ -584,13 +583,20 @@ BROWSER_ACTIONS = {
 }
 
 
+def open_browser(url):
+    return subprocess.run(
+        [sys.executable, "-c", "import sys, webbrowser; sys.exit(0 if webbrowser.open(sys.argv[1]) else 1)", url],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    ).returncode == 0
+
+
 def browser_handoff(args, issuer, connected_id):
     path, instruction = BROWSER_ACTIONS[(args.command, args.action)]
     url = path if (args.command, args.action) == ("billing", "receipts") else issuer + path
     try:
         if args.browser_driver:
             subprocess.Popen([args.browser_driver, url], close_fds=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        elif not webbrowser.open(url):
+        elif not open_browser(url):
             raise OSError()
     except OSError:
         raise Failure("browser_failed", "Could not open a browser. Set a default browser and retry. No browser action was confirmed.") from None
