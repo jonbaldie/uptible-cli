@@ -246,7 +246,10 @@ class Server(BaseHTTPRequestHandler):
                 elif self.token_fault[1] == 'invalid':
                     access = 'header.' + base64.urlsafe_b64encode(b'{"scopes":').decode().rstrip('=') + '.signature'
             type(self).issued_access = access
-            self.respond({'access_token': access, 'refresh_token': self.current_refresh, 'expires_in': 60})
+            response = {'access_token': access, 'expires_in': 60}
+            if self.login_response != 'access_only':
+                response['refresh_token'] = self.current_refresh
+            self.respond(response)
         elif self.path == '/api/v1/logout':
             self.logout_bearers.append(self.headers.get('Authorization'))
             if self.logout_error:
@@ -459,6 +462,27 @@ urllib.request.urlopen(url, timeout=5).read()
     def run_cli(self, *args, env=None, cwd=None):
         result = subprocess.run(self.base + list(args), capture_output=True, text=True, env=env, cwd=cwd, timeout=10)
         return result, json.loads(result.stdout or result.stderr)
+    def test_access_only_connection_can_login_read_and_logout(self):
+        Server.login_response = 'access_only'
+        result, _ = self.run_cli('auth', 'login', '--browser-driver', str(self.driver))
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(self.run_cli('account', 'show')[0].returncode, 0)
+        self.assertEqual(self.run_cli('auth', 'logout')[0].returncode, 0)
+        self.assertFalse(self.creds.exists())
+        self.assertEqual(Server.refreshes, 0)
+
+    def test_expired_access_only_connection_requests_reconnection_without_refresh(self):
+        Server.login_response = 'access_only'
+        self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
+        saved = json.loads(self.creds.read_text())
+        saved['expires_at'] = 0
+        self.creds.write_text(json.dumps(saved))
+        result, body = self.run_cli('account', 'show')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(body['error']['code'], 'reauthorization_required')
+        self.assertEqual(Server.refreshes, 0)
+        self.assertTrue(self.creds.exists())
+
     def use_named_connection(self, leading_dash=False):
         self.creds = self.path / "saved 'credential' $HOME.json"
         self.base[self.base.index('--credential-file') + 1] = str(self.creds)
