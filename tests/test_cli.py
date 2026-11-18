@@ -837,7 +837,7 @@ urllib.request.urlopen(url, timeout=5).read()
         Server.jwt_mode = True
         self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
         original = self.creds.read_text()
-        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, add=True, delete_leads=False, delete_notifications=False, email_change=False, events=True, billing=False, browser_driver=str(self.driver))
+        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, json=False, add=True, delete_leads=False, delete_notifications=False, email_change=False, events=True, billing=False, browser_driver=str(self.driver))
         with patch.object(uptible_cli.Store, 'write', side_effect=OSError('disk failure')):
             with self.assertRaises(OSError):
                 uptible_cli.run(args)
@@ -870,7 +870,7 @@ urllib.request.urlopen(url, timeout=5).read()
         Server.jwt_mode = True
         self.assertEqual(self.run_cli('auth', 'login', '--browser-driver', str(self.driver))[0].returncode, 0)
         original = self.creds.read_text()
-        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, add=True, delete_leads=False, delete_notifications=False, email_change=False, events=True, billing=False, browser_driver=str(self.driver))
+        args = argparse.Namespace(issuer='http://127.0.0.1:' + str(self.server.server_port), client_id='test', profile='default', credential_file=str(self.creds), command='auth', action='login', callback_timeout=5, json=False, add=True, delete_leads=False, delete_notifications=False, email_change=False, events=True, billing=False, browser_driver=str(self.driver))
         write = uptible_cli.Store.write
         def save_then_fail(store, value):
             write(store, value)
@@ -2049,10 +2049,38 @@ urllib.request.urlopen(url, timeout=5).read()
         self.assertEqual(body['error']['code'], 'state_mismatch')
         self.assertFalse(self.creds.exists())
     def test_denial_and_timeout_do_not_save(self):
-        for extra, expected in [({'DENY': '1'}, 'authorization_denied'), ({'NO_CALLBACK': '1'}, 'callback_timeout')]:
-            result, body = self.run_cli('auth', 'login', '--browser-driver', str(self.driver), '--callback-timeout', '1', env=dict(os.environ, **extra))
+        for extra, expected, timeout in [({'DENY': '1'}, 'authorization_denied', '5'), ({'NO_CALLBACK': '1'}, 'callback_timeout', '1')]:
+            result, body = self.run_cli('auth', 'login', '--browser-driver', str(self.driver), '--callback-timeout', timeout, env=dict(os.environ, **extra))
             self.assertEqual(body['error']['code'], expected)
             self.assertFalse(self.creds.exists())
+    def test_late_browser_driver_does_not_corrupt_json_output(self):
+        self.driver.write_text("#!/usr/bin/env python3\nimport sys, time\ntime.sleep(2)\nprint('late browser output', file=sys.stderr)\n")
+        result = subprocess.run(self.base + ['auth', 'login', '--browser-driver', str(self.driver), '--callback-timeout', '1'], capture_output=True, text=True, timeout=10)
+        self.assertEqual(json.loads(result.stderr)['error']['code'], 'callback_timeout')
+        self.assertFalse(self.creds.exists())
+
+    def test_default_browser_output_does_not_corrupt_json(self):
+        self.driver.write_text("#!/usr/bin/env python3\nimport sys, time\ntime.sleep(2)\nprint('late browser output', file=sys.stderr)\n")
+        env = dict(os.environ, BROWSER=str(self.driver))
+        result = subprocess.run(self.base + ['auth', 'login', '--callback-timeout', '1'], capture_output=True, text=True, env=env, timeout=10)
+        self.assertEqual(json.loads(result.stderr)['error']['code'], 'callback_timeout')
+        self.assertFalse(self.creds.exists())
+
+    def test_terminal_browser_receives_interactive_streams(self):
+        import pty
+        marker = self.path / 'terminal-streams'
+        self.driver.write_text("#!/usr/bin/env python3\nimport os, sys\nopen(" + repr(str(marker)) + ", 'w').write(str(all(os.isatty(i) for i in (0, 1, 2))) + ':' + input())\n")
+        master, slave = pty.openpty()
+        try:
+            base = [arg for arg in self.base if arg != '--json']
+            os.write(master, b'hello browser\n')
+            result = subprocess.run(base + ['auth', 'login', '--browser-driver', str(self.driver), '--callback-timeout', '5'], stdin=slave, stdout=slave, stderr=slave, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(marker.read_text(), 'True:hello browser')
+        finally:
+            os.close(master)
+            os.close(slave)
+
     def test_private_file_and_connection_identity(self):
         self.creds.write_text('{}')
         self.creds.chmod(0o644)

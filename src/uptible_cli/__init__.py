@@ -17,7 +17,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from filelock import FileLock, Timeout
@@ -224,7 +223,7 @@ class Store:
         elif self.load():
             self.keyring.delete_password("uptible-cli", self.identity)
 
-def authorize(issuer, client, browser, timeout, delete_leads=False, events=False, billing=False, delete_notifications=False, scopes=None, email_change=False):
+def authorize(issuer, client, browser, timeout, delete_leads=False, events=False, billing=False, delete_notifications=False, scopes=None, email_change=False, json_output=False):
     state = secrets.token_urlsafe(32)
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
@@ -261,8 +260,8 @@ def authorize(issuer, client, browser, timeout, delete_leads=False, events=False
         def launch():
             try:
                 if browser:
-                    subprocess.Popen([browser, url], close_fds=True)
-                elif not webbrowser.open(url):
+                    subprocess.Popen([browser, url], close_fds=True, **browser_streams(json_output))
+                elif not open_browser(url, json_output):
                     result["error"] = "browser_failed"
             except OSError:
                 result["error"] = "browser_failed"
@@ -365,7 +364,7 @@ def upgrade(args, issuer, store, original, recovery):
         old_account = request(issuer + "/api/v1/account", bearer=original["access_token"])
     old_id = account_id(old_account)
     scopes = old_scopes | additions
-    new = authorize(issuer, args.client_id, args.browser_driver, args.callback_timeout, scopes=" ".join(sorted(scopes)))
+    new = authorize(issuer, args.client_id, args.browser_driver, args.callback_timeout, scopes=" ".join(sorted(scopes)), json_output=args.json)
     access = new.get("access_token") if isinstance(new, dict) else None
     try:
         validated = store.validate(new)
@@ -448,7 +447,7 @@ def run(args):
                 if not token:
                     raise Failure("not_connected", "No saved connection. Run auth login first.")
                 return upgrade(args, issuer, store, token, recovery)
-            token = authorize(issuer, args.client_id, args.browser_driver, args.callback_timeout, args.delete_leads, args.events, args.billing, args.delete_notifications, email_change=args.email_change)
+            token = authorize(issuer, args.client_id, args.browser_driver, args.callback_timeout, args.delete_leads, args.events, args.billing, args.delete_notifications, email_change=args.email_change, json_output=args.json)
             try:
                 validated = store.validate(token)
                 account = request(issuer + "/api/v1/account", bearer=validated["access_token"])
@@ -589,13 +588,26 @@ BROWSER_ACTIONS = {
 }
 
 
+def browser_streams(json_output):
+    if not json_output and all(stream.isatty() for stream in (sys.stdin, sys.stdout, sys.stderr)):
+        return {}
+    return {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+
+
+def open_browser(url, json_output):
+    return subprocess.run(
+        [sys.executable, "-c", "import sys, webbrowser; sys.exit(0 if webbrowser.open(sys.argv[1]) else 1)", url],
+        **browser_streams(json_output),
+    ).returncode == 0
+
+
 def browser_handoff(args, issuer, connected_id):
     path, instruction = BROWSER_ACTIONS[(args.command, args.action)]
     url = path if (args.command, args.action) == ("billing", "receipts") else issuer + path
     try:
         if args.browser_driver:
-            subprocess.Popen([args.browser_driver, url], close_fds=True)
-        elif not webbrowser.open(url):
+            subprocess.Popen([args.browser_driver, url], close_fds=True, **browser_streams(args.json))
+        elif not open_browser(url, args.json):
             raise OSError()
     except OSError:
         raise Failure("browser_failed", "Could not open a browser. Set a default browser and retry. No browser action was confirmed.") from None
