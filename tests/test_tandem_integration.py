@@ -19,9 +19,13 @@ Provisioning (disposable local server, see tests/tandem_seed.php):
        TANDEM_CREDENTIAL_FILE=/tmp/tandem/creds.json \\
        python -m unittest tests.test_tandem_integration -v
 
-The full OAuth login flow (PKCE, consent, token exchange, refresh,
-logout) is covered by TandemLoginFlow when TANDEM_BROWSER_DRIVER,
-TANDEM_EMAIL and TANDEM_PASSWORD are set.
+The full OAuth login flow (PKCE, consent, token exchange, logout
+revocation) is covered by TandemLoginFlow when TANDEM_BROWSER_DRIVER,
+TANDEM_EMAIL and TANDEM_PASSWORD are set. Refresh-token rotation is
+not exercised here (access tokens live ~15 minutes); it was verified
+by manually expiring a credential copy and confirming the CLI
+refreshes against the real server, and by a direct refresh-grant
+replay returning invalid_grant.
 
 Rate limits are real: management reads/writes allow 60 requests per
 minute and token exchange 30 per minute per account. If a run reports
@@ -34,11 +38,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 import urllib.parse
 import uuid
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DRIVER = os.path.join(ROOT, "tests", "tandem_browser_driver.py")
 
 PRODUCTION_HOSTS = {
     "uptible.com",
@@ -54,7 +58,11 @@ def tandem_env():
     issuer = os.environ.get("TANDEM_ISSUER", "")
     client_id = os.environ.get("TANDEM_CLIENT_ID", "")
     credential_file = os.environ.get("TANDEM_CREDENTIAL_FILE", "")
-    host = (urllib.parse.urlsplit(issuer).hostname or "").lower()
+    host = (urllib.parse.urlsplit(issuer).hostname or "").lower().rstrip(".")
+    try:
+        host = host.encode("idna").decode("ascii")
+    except (UnicodeError, ValueError):
+        pass
     if host in PRODUCTION_HOSTS or host.endswith(".uptible.com"):
         raise AssertionError("Tandem test refused: production issuer")
     if not (issuer and client_id and credential_file and os.path.isfile(credential_file)):
@@ -104,9 +112,11 @@ class TandemCommandMatrix(unittest.TestCase):
         self.assertTrue(payload["connected"])
         self.assertIn("email", payload["account"])
 
+        status_email = payload["account"]["email"]
         rc, payload, _, _ = self.cli("account", "show")
         self.assertEqual(rc, 0, payload)
-        self.assertEqual(payload["email"], payload.get("email", payload["email"]))
+        self.assertTrue(payload["email"])
+        self.assertEqual(payload["email"], status_email)
 
         for args in (
             ("stats", "show"),
@@ -254,6 +264,29 @@ class TandemLoginFlow(unittest.TestCase):
             rc, payload, _, _ = run_cli(self.issuer, self.client_id, credential_file, "auth", "status")
             self.assertEqual(rc, 0, payload)
             self.assertFalse(payload["connected"])
+
+
+class TandemProductionGuard(unittest.TestCase):
+    def test_production_issuers_are_refused(self):
+        for issuer in (
+            "https://uptible.com",
+            "https://uptible.com.",
+            "https://www.uptible.com",
+            "https://uptible.fly.dev",
+            "https://dev-uptible.fly.dev",
+        ):
+            with self.subTest(issuer=issuer), unittest.mock.patch.dict(
+                os.environ,
+                {
+                    "UPTIBLE_TANDEM": "1",
+                    "TANDEM_ISSUER": issuer,
+                    "TANDEM_CLIENT_ID": "synthetic",
+                    "TANDEM_CREDENTIAL_FILE": __file__,
+                },
+                clear=True,
+            ):
+                with self.assertRaises(AssertionError):
+                    tandem_env()
 
 
 if __name__ == "__main__":
