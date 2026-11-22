@@ -25,6 +25,7 @@ SOURCE_FILES = {'PKG-INFO', 'README.md', 'DESIGN.md', 'CHANGELOG.md', 'docs/capa
                 'src/uptible_cli.egg-info/dependency_links.txt', 'src/uptible_cli.egg-info/entry_points.txt',
                 'src/uptible_cli.egg-info/requires.txt', 'src/uptible_cli.egg-info/top_level.txt',
                 'tests/test_cli.py', 'tests/test_completion.py', 'tests/test_integration.py', 'tests/test_contract.py',
+                'tests/test_tandem_integration.py', 'tests/tandem_browser_driver.py', 'tests/tandem_seed.php',
                 'MANIFEST.in', 'docs/contracts/README.md', 'docs/contracts/manifest.json',
                 'docs/contracts/v1.1.0.json', 'docs/contracts/v1.2.0.json', 'docs/contracts/cli-operations.json'}
 

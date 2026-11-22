@@ -6,3 +6,5 @@ include docs/contracts/README.md
 include DESIGN.md
 include CHANGELOG.md
 include docs/capabilities.md
+include tests/tandem_browser_driver.py
+include tests/tandem_seed.php
